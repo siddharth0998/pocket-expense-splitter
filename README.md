@@ -6,6 +6,13 @@ Pocket is a focused full-stack expense splitter for roommates and small groups. 
 
 The app supports equal and unequal splits, keeps a persistent audit trail, and minimizes settlement transactions so the group can settle up with the fewest payments possible.
 
+## Live Demo
+
+Deployed on an AWS EC2 instance.
+
+- Web app: `http://15.134.36.204:3000`
+- Backend API docs: `http://15.134.36.204:8000/docs`
+
 ## Highlights
 
 - **Groups and members**: Create a group, add members, and manage a shared ledger.
