@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, ForeignKey, DateTime, Table
+from sqlalchemy import Column, String, Numeric, ForeignKey, DateTime, Table, CheckConstraint, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -9,8 +9,8 @@ Base = declarative_base()
 group_members = Table(
     "group_members",
     Base.metadata,
-    Column("user_id", String, ForeignKey("users.id"), primary_key=True),
-    Column("group_id", String, ForeignKey("groups.id"), primary_key=True)
+    Column("user_id", String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("group_id", String, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
 )
 
 # Core Entities
@@ -33,23 +33,29 @@ class Group(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
+    currency = Column(String, default="USD", nullable=False)  # Currency Loophole Fix
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
     members = relationship("User", secondary=group_members, back_populates="groups")
-    expenses = relationship("Expense", back_populates="group")
-    settlements = relationship("Settlement", back_populates="group")
+    expenses = relationship("Expense", back_populates="group", cascade="all, delete-orphan", passive_deletes=True)
+    settlements = relationship("Settlement", back_populates="group", cascade="all, delete-orphan", passive_deletes=True)
 
 # The Ledger (Expenses & Splits)
 class Expense(Base):
     __tablename__ = "expenses"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    group_id = Column(String, ForeignKey("groups.id"), nullable=False)
-    payer_id = Column(String, ForeignKey("users.id"), nullable=False)
+    group_id = Column(String, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True) # Added Index and Cascade
+    payer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     description = Column(String, nullable=False)
-    amount = Column(Float, nullable=False) # Total amount paid
+    amount = Column(Numeric(10, 2), nullable=False) # Precision Loophole Fix
+    is_deleted = Column(Boolean, default=False) # Soft Delete Loophole Fix
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint('amount > 0', name='check_positive_amount'), # Constraint Loophole Fix
+    )
 
     # Relationships
     group = relationship("Group", back_populates="expenses")
@@ -64,9 +70,9 @@ class ExpenseSplit(Base):
     __tablename__ = "expense_splits"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    expense_id = Column(String, ForeignKey("expenses.id"), nullable=False)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False)
-    amount_owed = Column(Float, nullable=False)
+    expense_id = Column(String, ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    amount_owed = Column(Numeric(10, 2), nullable=False) # Precision Loophole Fix
 
     # Relationships
     expense = relationship("Expense", back_populates="splits")
@@ -80,11 +86,17 @@ class Settlement(Base):
     __tablename__ = "settlements"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    group_id = Column(String, ForeignKey("groups.id"), nullable=False)
-    payer_id = Column(String, ForeignKey("users.id"), nullable=False)
-    receiver_id = Column(String, ForeignKey("users.id"), nullable=False)
-    amount = Column(Float, nullable=False)
+    group_id = Column(String, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True) # Added Index and Cascade
+    payer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    receiver_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False) # Precision Loophole Fix
+    is_deleted = Column(Boolean, default=False) # Soft Delete Loophole Fix
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        CheckConstraint('amount > 0', name='check_positive_settlement_amount'), # Constraint Loophole Fix
+        CheckConstraint('payer_id != receiver_id', name='check_different_users'), # Constraint Loophole Fix
+    )
 
     # Relationships
     group = relationship("Group", back_populates="settlements")

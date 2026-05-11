@@ -1,5 +1,6 @@
 from typing import List, Dict, Tuple
 from dataclasses import dataclass
+from decimal import Decimal
 
 @dataclass
 class Transaction:
@@ -22,17 +23,19 @@ def calculate_min_settlements(
     # Step 1: Calculate the Net Balance for every user
     # Positive balance = Owed money (Creditor)
     # Negative balance = Owes money (Debtor)
-    balances: Dict[str, float] = {}
+    balances: Dict[str, Decimal] = {}
 
     # Add what they paid
     for expense in expenses_data:
         payer = expense["payer_id"]
-        balances[payer] = balances.get(payer, 0.0) + expense["amount"]
+        amt = Decimal(str(expense["amount"]))
+        balances[payer] = balances.get(payer, Decimal('0.0')) + amt
 
     # Subtract what they owe
     for split in splits_data:
         debtor = split["user_id"]
-        balances[debtor] = balances.get(debtor, 0.0) - split["amount_owed"]
+        amt = Decimal(str(split["amount_owed"]))
+        balances[debtor] = balances.get(debtor, Decimal('0.0')) - amt
 
     # Step 2: Separate into Debtors and Creditors
     # Convert to lists of tuples: (user_id, absolute_amount)
@@ -40,8 +43,7 @@ def calculate_min_settlements(
     creditors = []
     
     for user_id, balance in balances.items():
-        # Rounding to 2 decimal places to avoid floating point precision issues
-        balance = round(balance, 2) 
+        balance = balance.quantize(Decimal('0.01'))
         if balance < 0:
             debtors.append([user_id, abs(balance)]) # Store as lists so they are mutable
         elif balance > 0:
@@ -60,24 +62,23 @@ def calculate_min_settlements(
         creditor_id, credit_amount = creditors[0]
 
         # The settlement amount is the smaller of the two largest balances
-        settle_amount = min(debt_amount, credit_amount)
-        settle_amount = round(settle_amount, 2)
+        settle_amount = min(debt_amount, credit_amount).quantize(Decimal('0.01'))
 
-        # Record the transaction
+        # Record the transaction (convert back to float for JSON serialization)
         settlements.append(Transaction(
             payer_id=debtor_id,
             receiver_id=creditor_id,
-            amount=settle_amount
+            amount=float(settle_amount)
         ))
 
         # Update the remaining balances
-        debtors[0][1] = round(debt_amount - settle_amount, 2)
-        creditors[0][1] = round(credit_amount - settle_amount, 2)
+        debtors[0][1] = (debt_amount - settle_amount).quantize(Decimal('0.01'))
+        creditors[0][1] = (credit_amount - settle_amount).quantize(Decimal('0.01'))
 
         # Remove users who are fully settled up
-        if debtors[0][1] == 0:
+        if debtors[0][1] == Decimal('0.00'):
             debtors.pop(0)
-        if creditors[0][1] == 0:
+        if creditors[0][1] == Decimal('0.00'):
             creditors.pop(0)
 
     return settlements
