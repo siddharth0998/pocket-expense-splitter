@@ -31,6 +31,7 @@ services:
     volumes:
       # This allows you to edit code locally and see it update live without rebuilding
       - ./backend/app:/code/app
+      - ./backend/uploads:/code/uploads
 
 volumes:
   postgres_data: # Persists your database data even if you destroy the container

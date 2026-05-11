@@ -1,6 +1,6 @@
 // src/lib/api.ts
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // --- Types ---
 export interface Split {
@@ -14,6 +14,11 @@ export interface ExpensePayload {
   description: string;
   amount: number;
   splits: Split[];
+}
+
+export interface RecurringExpensePayload extends ExpensePayload {
+  start_date?: string;
+  day_of_month?: number;
 }
 
 export interface SettlementPayload {
@@ -40,6 +45,19 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   return res.json();
 }
 
+async function uploadAPI(endpoint: string, formData: FormData) {
+  const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const error = await res.json();
+    throw new Error(error.detail || "Upload failed");
+  }
+  return res.json();
+}
+
 // --- API Methods ---
 export const api = {
   // Users & Groups
@@ -61,9 +79,24 @@ export const api = {
   // Ledger Actions
   createExpense: (payload: ExpensePayload) => 
     fetchAPI("/expenses/", { method: "POST", body: JSON.stringify(payload) }),
+
+  uploadReceipt: (expenseId: string, file: File) => {
+    const formData = new FormData();
+    formData.append("receipt", file);
+    return uploadAPI(`/expenses/${expenseId}/receipt`, formData);
+  },
+
+  createRecurringExpense: (payload: RecurringExpensePayload) =>
+    fetchAPI("/recurring-expenses/", { method: "POST", body: JSON.stringify(payload) }),
+
+  getRecurringExpenses: (groupId: string) =>
+    fetchAPI(`/groups/${groupId}/recurring-expenses`),
     
   getFeed: (groupId: string) => 
     fetchAPI(`/groups/${groupId}/feed`),
+
+  getExportUrl: (groupId: string) =>
+    `${API_BASE_URL}/groups/${groupId}/export.csv`,
 
   // Math & Settlements
   getSuggestedSettlements: (groupId: string) => 

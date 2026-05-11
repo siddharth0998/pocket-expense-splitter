@@ -9,11 +9,17 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Wallet, ChevronRight } from "lucide-react";
 
+type GroupSummary = {
+  id: string;
+  name: string;
+  currency: string;
+};
+
 export default function Home() {
   const router = useRouter();
   const [groupName, setGroupName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [groups, setGroups] = useState<any[]>([]);
+  const [groups, setGroups] = useState<GroupSummary[]>([]);
 
   useEffect(() => {
     const fetchGroups = async () => {

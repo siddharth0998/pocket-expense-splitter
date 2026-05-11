@@ -1,9 +1,9 @@
 // src/app/[groupId]/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { api } from "@/lib/api";
+import { API_BASE_URL, api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,16 +13,67 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowRightLeft, Receipt, PlusCircle, Users, Trash2 } from "lucide-react";
+import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2 } from "lucide-react";
+
+type Member = {
+  id: string;
+  name: string;
+};
+
+type Group = {
+  id: string;
+  name: string;
+  members: Member[];
+};
+
+type Split = {
+  user_id: string;
+  amount_owed: number;
+};
+
+type FeedItem = {
+  type: "expense" | "settlement";
+  id: string;
+  description: string;
+  amount: number;
+  receipt_url?: string | null;
+  generated_for_month?: string | null;
+};
+
+type SuggestedSettlement = {
+  payer_id: string;
+  payer_name: string;
+  receiver_id: string;
+  receiver_name: string;
+  amount: number;
+};
+
+type RecurringExpense = {
+  id: string;
+  description: string;
+  amount: number;
+  payer_name: string;
+  day_of_month: number;
+  next_run_on: string;
+};
+
+type SelectedMember = {
+  id: string;
+  name: string;
+};
+
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
 
 export default function GroupDashboard() {
   const params = useParams();
   const groupId = params.groupId as string;
 
   // --- State ---
-  const [group, setGroup] = useState<any>(null);
-  const [feed, setFeed] = useState<any[]>([]);
-  const [settlements, setSettlements] = useState<any[]>([]);
+  const [group, setGroup] = useState<Group | null>(null);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [settlements, setSettlements] = useState<SuggestedSettlement[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Modal States
@@ -38,38 +89,46 @@ export default function GroupDashboard() {
   const [involvedMembers, setInvolvedMembers] = useState<string[]>([]); // For equal splits
   const [splitType, setSplitType] = useState<"equal" | "exact">("equal");
   const [customSplits, setCustomSplits] = useState<{ [key: string]: string }>({});
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [isRecurringExpense, setIsRecurringExpense] = useState(false);
+  const [recurringStartDate, setRecurringStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recurringDayOfMonth, setRecurringDayOfMonth] = useState("");
 
   // Settlement States
-  const [settlePayer, setSettlePayer] = useState<any>(null);
-  const [settleReceiver, setSettleReceiver] = useState<any>(null);
+  const [settlePayer, setSettlePayer] = useState<SelectedMember | null>(null);
+  const [settleReceiver, setSettleReceiver] = useState<SelectedMember | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
 
   // --- Data Loading ---
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const [groupData, feedData, settlementData] = await Promise.all([
-        api.getGroup(groupId),
-        api.getFeed(groupId),
-        api.getSuggestedSettlements(groupId)
+      const groupData = await api.getGroup(groupId);
+      const feedData = await api.getFeed(groupId);
+      const [settlementData, recurringData] = await Promise.all([
+        api.getSuggestedSettlements(groupId),
+        api.getRecurringExpenses(groupId)
       ]);
-      setGroup(groupData);
+      const loadedGroup = groupData as Group;
+      setGroup(loadedGroup);
       setFeed(Array.isArray(feedData) ? feedData : feedData?.feed || []);
       setSettlements(Array.isArray(settlementData) ? settlementData : settlementData?.settlements || []);
+      setRecurringExpenses(Array.isArray(recurringData) ? recurringData : recurringData?.recurring_expenses || []);
       
       // Default to all members being involved in new expenses
-      if (groupData?.members) {
-        setInvolvedMembers(groupData.members.map((m: any) => m.id));
+      if (loadedGroup?.members) {
+        setInvolvedMembers(loadedGroup.members.map((m) => m.id));
       }
     } catch (error) {
       console.error("Failed to load group data", error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [groupId]);
 
   useEffect(() => {
-    loadData();
-  }, [groupId]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadData();
+  }, [loadData]);
 
   // --- Actions ---
   const handleAddMember = async (e: React.FormEvent) => {
@@ -81,8 +140,8 @@ export default function GroupDashboard() {
       setNewMemberName("");
       setIsMemberModalOpen(false);
       loadData();
-    } catch (error: any) {
-      alert(error.message || "Failed to add member");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to add member"));
     }
   };
 
@@ -91,7 +150,7 @@ export default function GroupDashboard() {
     if (!expenseDesc || !expenseAmount || !payerId) return;
 
     const amountNum = parseFloat(expenseAmount);
-    let splits: any[] = [];
+    let splits: Split[] = [];
     
     if (splitType === "equal") {
       if (involvedMembers.length === 0) return;
@@ -119,22 +178,40 @@ export default function GroupDashboard() {
     }
 
     try {
-      await api.createExpense({
+      const payload = {
         group_id: groupId,
         payer_id: payerId,
         description: expenseDesc,
         amount: amountNum,
         splits: splits
-      });
+      };
+
+      if (isRecurringExpense) {
+        await api.createRecurringExpense({
+          ...payload,
+          start_date: recurringStartDate || undefined,
+          day_of_month: recurringDayOfMonth ? parseInt(recurringDayOfMonth, 10) : undefined
+        });
+      } else {
+        const result = await api.createExpense(payload);
+        if (receiptFile && result?.expense_id) {
+          await api.uploadReceipt(result.expense_id, receiptFile);
+        }
+      }
+
       setExpenseDesc("");
       setExpenseAmount("");
       setPayerId("");
       setSplitType("equal");
       setCustomSplits({});
+      setReceiptFile(null);
+      setIsRecurringExpense(false);
+      setRecurringStartDate(new Date().toISOString().slice(0, 10));
+      setRecurringDayOfMonth("");
       setIsExpenseModalOpen(false);
       loadData();
-    } catch (error: any) {
-      alert(error.message || "Failed to add expense.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to add expense."));
     }
   };
 
@@ -150,24 +227,19 @@ export default function GroupDashboard() {
   const handleSettleUp = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseFloat(settleAmount);
-    if (!amountNum || amountNum <= 0) return;
+    if (!amountNum || amountNum <= 0 || !settlePayer || !settleReceiver) return;
 
     try {
-      // A settlement is just an expense where the payer pays the receiver directly
-      await api.createExpense({
+      await api.recordSettlement({
         group_id: groupId,
         payer_id: settlePayer.id,
-        description: `Payment to ${settleReceiver.name}`,
-        amount: amountNum,
-        splits: [{
-          user_id: settleReceiver.id,
-          amount_owed: amountNum
-        }]
+        receiver_id: settleReceiver.id,
+        amount: amountNum
       });
       setIsSettleModalOpen(false);
       loadData();
-    } catch (error: any) {
-      alert(error.message || "Failed to record settlement.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to record settlement."));
     }
   };
 
@@ -179,12 +251,13 @@ export default function GroupDashboard() {
   };
 
   const handleDeleteGroup = async () => {
+    if (!group) return;
     if (!window.confirm(`Are you sure you want to delete "${group.name}"? This cannot be undone.`)) return;
     try {
       await api.deleteGroup(groupId);
       window.location.href = "/"; // Navigate back home
-    } catch (error: any) {
-      alert(error.message || "Failed to delete group. Ensure all debts are settled first.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to delete group. Ensure all debts are settled first."));
     }
   };
 
@@ -197,8 +270,8 @@ export default function GroupDashboard() {
     try {
       await api.deleteExpense(expenseId);
       loadData();
-    } catch (error: any) {
-      alert(error.message || "Failed to delete.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to delete."));
     }
   };
 
@@ -223,7 +296,10 @@ export default function GroupDashboard() {
           </p>
         </div>
         
-        <div className="flex gap-3 w-full sm:w-auto">
+        <div className="flex flex-wrap gap-3 w-full sm:w-auto">
+          <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => window.location.href = api.getExportUrl(groupId)}>
+            <Download className="w-4 h-4 mr-2" /> Export CSV
+          </Button>
           <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => setIsMemberModalOpen(true)}>
             Add Member
           </Button>
@@ -263,7 +339,7 @@ export default function GroupDashboard() {
                   <Select value={payerId} onValueChange={setPayerId}>
                     <SelectTrigger><SelectValue placeholder="Select a member" /></SelectTrigger>
                     <SelectContent>
-                      {group.members.map((m: any) => (
+                      {group.members.map((m) => (
                         <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -282,7 +358,7 @@ export default function GroupDashboard() {
                   
                   {splitType === "equal" ? (
                     <div className="grid grid-cols-2 gap-2 mt-2">
-                      {group.members.map((m: any) => (
+                      {group.members.map((m) => (
                         <div key={m.id} className="flex items-center space-x-2">
                           <Checkbox 
                             id={`member-${m.id}`} 
@@ -297,7 +373,7 @@ export default function GroupDashboard() {
                     </div>
                   ) : (
                     <div className="space-y-2 mt-2">
-                      {group.members.map((m: any) => (
+                      {group.members.map((m) => (
                         <div key={m.id} className="flex items-center space-x-2">
                           <Label className="w-24 truncate">{m.name}</Label>
                           <Input 
@@ -317,8 +393,55 @@ export default function GroupDashboard() {
                   )}
                 </div>
 
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="recurring-expense"
+                      checked={isRecurringExpense}
+                      onCheckedChange={(checked) => {
+                        setIsRecurringExpense(checked === true);
+                        if (checked === true) setReceiptFile(null);
+                      }}
+                    />
+                    <label htmlFor="recurring-expense" className="text-sm font-medium leading-none">
+                      Repeat monthly
+                    </label>
+                  </div>
+
+                  {isRecurringExpense && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>First run</Label>
+                        <Input type="date" value={recurringStartDate} onChange={(e) => setRecurringStartDate(e.target.value)} />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Day</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max="31"
+                          placeholder="Auto"
+                          value={recurringDayOfMonth}
+                          onChange={(e) => setRecurringDayOfMonth(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 pt-4 border-t">
+                  <Label>Receipt photo</Label>
+                  <Input
+                    key={isRecurringExpense ? "receipt-disabled" : "receipt-enabled"}
+                    type="file"
+                    accept="image/*"
+                    disabled={isRecurringExpense}
+                    onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
+                  />
+                </div>
+
                 <Button type="submit" className="w-full mt-4" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
-                  {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : "Save Expense"}
+                  {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : isRecurringExpense ? "Save Monthly Expense" : "Save Expense"}
                 </Button>
               </form>
             </DialogContent>
@@ -370,33 +493,43 @@ export default function GroupDashboard() {
               <TableBody>
                 {feed.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-zinc-500 py-8">
+                    <TableCell colSpan={4} className="text-center text-zinc-500 py-8">
                       No expenses yet. Add a member and an expense to get started!
                     </TableCell>
                   </TableRow>
                 ) : (
-                  feed.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <Badge variant={item.description?.startsWith("Payment") ? "secondary" : "default"}>
-                          {item.description?.startsWith("Payment") ? "Payment" : "Expense"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {item.description}
-                      </TableCell>
-                      <TableCell className="text-right font-mono">
-                        ${item.amount.toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        {item.type === "expense" && (
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-400 hover:text-red-500 h-8 w-8">
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  feed.map((item, index) => {
+                    const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
+                    return (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <Badge variant={item.type === "settlement" ? "secondary" : "default"}>
+                            {item.type === "settlement" ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <span>{item.description}</span>
+                            {item.receipt_url && (
+                              <a href={receiptHref} target="_blank" rel="noreferrer" className="text-zinc-500 hover:text-zinc-900" title="Open receipt">
+                                <Paperclip className="w-4 h-4" />
+                              </a>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right font-mono">
+                          ${item.amount.toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          {item.type === "expense" && (
+                            <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-400 hover:text-red-500 h-8 w-8">
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -440,6 +573,32 @@ export default function GroupDashboard() {
               ))}
             </div>
           )}
+
+          <div className="pt-4 space-y-3">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <CalendarClock className="w-5 h-5 text-zinc-400" /> Monthly Expenses
+            </h2>
+            {recurringExpenses.length === 0 ? (
+              <Card className="p-5 text-center text-zinc-500 bg-white border border-dashed">
+                No monthly expenses.
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {recurringExpenses.map((expense) => (
+                  <Card key={expense.id} className="p-4 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="font-semibold text-zinc-900">{expense.description}</div>
+                        <div className="text-sm text-zinc-500">Paid by {expense.payer_name} on day {expense.day_of_month}</div>
+                      </div>
+                      <div className="font-mono font-bold">${expense.amount.toFixed(2)}</div>
+                    </div>
+                    <div className="mt-2 text-xs text-zinc-500">Next: {expense.next_run_on}</div>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
       </div>
