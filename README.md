@@ -201,3 +201,17 @@ A production deployment should run:
 - persistent storage for uploaded receipts, preferably object storage such as S3 instead of local disk
 
 For a simple VM deployment, install Docker, set the frontend API URL, and run the backend/database with Docker Compose.
+
+On the server, create a root `.env` file so the backend allows browser requests from the deployed frontend:
+
+```bash
+FRONTEND_URL=http://YOUR_EC2_PUBLIC_IP:3000
+```
+
+Then create `frontend/.env.production` so the frontend calls the deployed backend:
+
+```bash
+NEXT_PUBLIC_API_URL=http://YOUR_EC2_PUBLIC_IP:8000
+```
+
+After changing either value, rebuild/restart the affected service.
