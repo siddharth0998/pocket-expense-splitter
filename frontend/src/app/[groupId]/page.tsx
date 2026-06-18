@@ -7,13 +7,14 @@ import { API_BASE_URL, api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2 } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, CheckCircle2 } from "lucide-react";
 
 type Member = {
   id: string;
@@ -78,6 +79,7 @@ export default function GroupDashboard() {
 
   // Modal States
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [isViewMembersModalOpen, setIsViewMembersModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
 
@@ -113,7 +115,7 @@ export default function GroupDashboard() {
       setFeed(Array.isArray(feedData) ? feedData : feedData?.feed || []);
       setSettlements(Array.isArray(settlementData) ? settlementData : settlementData?.settlements || []);
       setRecurringExpenses(Array.isArray(recurringData) ? recurringData : recurringData?.recurring_expenses || []);
-      
+
       // Default to all members being involved in new expenses
       if (loadedGroup?.members) {
         setInvolvedMembers(loadedGroup.members.map((m) => m.id));
@@ -135,13 +137,23 @@ export default function GroupDashboard() {
     e.preventDefault();
     if (!newMemberName.trim()) return;
     try {
-      const user = await api.createUser(newMemberName, `${newMemberName.replace(/\s+/g, '').toLowerCase()}@example.com`);
-      await api.addMemberToGroup(groupId, user.id);
+      const res = await api.createUser(newMemberName, `${newMemberName.replace(/\s+/g, '').toLowerCase()}@example.com`);
+      await api.addMemberToGroup(groupId as string, res.id);
       setNewMemberName("");
       setIsMemberModalOpen(false);
-      loadData();
-    } catch (error: unknown) {
-      alert(errorMessage(error, "Failed to add member"));
+      void loadData();
+    } catch (err: any) {
+      alert(err.message || "Failed to add member");
+    }
+  };
+
+  const handleRemoveMember = async (userId: string, userName: string) => {
+    if (!window.confirm(`Are you sure you want to remove ${userName} from the group?`)) return;
+    try {
+      await api.removeMemberFromGroup(groupId as string, userId);
+      void loadData();
+    } catch (err: any) {
+      alert(err.message || "Failed to remove member. They might have unsettled debts!");
     }
   };
 
@@ -151,7 +163,7 @@ export default function GroupDashboard() {
 
     const amountNum = parseFloat(expenseAmount);
     let splits: Split[] = [];
-    
+
     if (splitType === "equal") {
       if (involvedMembers.length === 0) return;
       const splitAmount = amountNum / involvedMembers.length;
@@ -245,7 +257,7 @@ export default function GroupDashboard() {
 
   // Toggle member involvement in an expense
   const toggleInvolvedMember = (memberId: string) => {
-    setInvolvedMembers(prev => 
+    setInvolvedMembers(prev =>
       prev.includes(memberId) ? prev.filter(id => id !== memberId) : [...prev, memberId]
     );
   };
@@ -276,331 +288,382 @@ export default function GroupDashboard() {
   };
 
   // --- Render ---
-  if (isLoading) return <div className="p-8 text-center text-zinc-500 animate-pulse">Loading ledger...</div>;
+  if (isLoading) return <div className="p-8 text-center text-muted-foreground animate-pulse">Loading ledger...</div>;
   if (!group) return <div className="p-8 text-center text-red-500">Group not found.</div>;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8 space-y-8 min-h-screen bg-zinc-50">
-      
+    <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-8 min-h-screen bg-background pb-20 relative">
+      <div className="absolute top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
+
       {/* HEADER SECTION */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-6 rounded-xl border shadow-sm gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight text-zinc-900">{group.name}</h1>
-            <Button variant="ghost" size="icon" onClick={handleDeleteGroup} className="text-red-500 hover:text-red-600 hover:bg-red-50" title="Delete Group">
-              <Trash2 className="w-5 h-5" />
-            </Button>
-          </div>
-          <p className="text-zinc-500 flex items-center gap-2 mt-1">
-            <Users className="w-4 h-4" /> {group.members.length} Members
-          </p>
+      <div className="flex flex-col items-center text-center space-y-4 py-8 animate-in fade-in slide-in-from-top-4 duration-700">
+        <div className="bg-primary/10 p-4 rounded-full mb-2">
+          <Users className="w-8 h-8 text-primary" />
         </div>
-        
-        <div className="flex flex-wrap gap-3 w-full sm:w-auto">
-          <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => window.location.href = api.getExportUrl(groupId)}>
-            <Download className="w-4 h-4 mr-2" /> Export CSV
+        <div>
+          <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{group.name}</h1>
+          <button onClick={() => setIsViewMembersModalOpen(true)} className="text-muted-foreground mt-2 font-medium hover:text-primary transition-colors hover:underline cursor-pointer">
+            {group.members.length} Members
+          </button>
+        </div>
+
+        <div className="flex flex-wrap justify-center gap-3 pt-6 w-full">
+          <Button size="lg" className="rounded-full shadow-lg shadow-primary/20 h-12 px-6" onClick={() => setIsExpenseModalOpen(true)}>
+            <PlusCircle className="w-5 h-5 mr-2" /> Add Expense
           </Button>
-          <Button variant="outline" className="flex-1 sm:flex-none" onClick={() => setIsMemberModalOpen(true)}>
+          <Button variant="outline" size="lg" className="rounded-full bg-card shadow-sm h-12 px-6 border-border hover:border-primary/50" onClick={() => setIsMemberModalOpen(true)}>
             Add Member
           </Button>
-          <Button className="bg-zinc-900 text-white flex-1 sm:flex-none" onClick={() => setIsExpenseModalOpen(true)}>
-            <PlusCircle className="w-4 h-4 mr-2" /> Add Expense
+          <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border hover:border-primary/50" onClick={() => setIsViewMembersModalOpen(true)} title="View Members">
+            <Users className="w-5 h-5 text-muted-foreground hover:text-primary transition-colors" />
           </Button>
-
-          {/* ADD MEMBER MODAL */}
-          <Dialog open={isMemberModalOpen} onOpenChange={setIsMemberModalOpen}>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Add a new member</DialogTitle></DialogHeader>
-              <form onSubmit={handleAddMember} className="space-y-4 pt-4">
-                <div className="space-y-2">
-                  <Label>Name</Label>
-                  <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" />
-                </div>
-                <Button type="submit" className="w-full">Add to Group</Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-
-          {/* ADD EXPENSE MODAL WITH CUSTOM SPLITS */}
-          <Dialog open={isExpenseModalOpen} onOpenChange={setIsExpenseModalOpen}>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Record an expense</DialogTitle></DialogHeader>
-              <form onSubmit={handleAddExpense} className="space-y-4 pt-4">
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="Dinner at Joe's" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Amount ($)</Label>
-                  <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="0.00" />
-                </div>
-                <div className="space-y-2">
-                  <Label>Who Paid?</Label>
-                  <Select value={payerId} onValueChange={setPayerId}>
-                    <SelectTrigger><SelectValue placeholder="Select a member" /></SelectTrigger>
-                    <SelectContent>
-                      {group.members.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                {/* Custom Split Toggle */}
-                <div className="space-y-3 pt-4 border-t mt-4">
-                  <div className="flex justify-between items-center">
-                    <Label>How to split?</Label>
-                    <div className="flex gap-2">
-                      <Button type="button" variant={splitType === "equal" ? "default" : "outline"} size="sm" onClick={() => setSplitType("equal")}>Equal</Button>
-                      <Button type="button" variant={splitType === "exact" ? "default" : "outline"} size="sm" onClick={() => setSplitType("exact")}>Exact Amounts</Button>
-                    </div>
-                  </div>
-                  
-                  {splitType === "equal" ? (
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      {group.members.map((m) => (
-                        <div key={m.id} className="flex items-center space-x-2">
-                          <Checkbox 
-                            id={`member-${m.id}`} 
-                            checked={involvedMembers.includes(m.id)}
-                            onCheckedChange={() => toggleInvolvedMember(m.id)}
-                          />
-                          <label htmlFor={`member-${m.id}`} className="text-sm font-medium leading-none">
-                            {m.name}
-                          </label>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="space-y-2 mt-2">
-                      {group.members.map((m) => (
-                        <div key={m.id} className="flex items-center space-x-2">
-                          <Label className="w-24 truncate">{m.name}</Label>
-                          <Input 
-                            type="number" 
-                            step="0.01" 
-                            min="0"
-                            placeholder="0.00"
-                            value={customSplits[m.id] || ""}
-                            onChange={(e) => setCustomSplits({ ...customSplits, [m.id]: e.target.value })}
-                          />
-                        </div>
-                      ))}
-                      <div className="text-xs text-right text-zinc-500 mt-1">
-                        Total entered: ${Object.values(customSplits).reduce((sum, val) => sum + (parseFloat(val) || 0), 0).toFixed(2)} / ${parseFloat(expenseAmount || "0").toFixed(2)}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3 pt-4 border-t">
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id="recurring-expense"
-                      checked={isRecurringExpense}
-                      onCheckedChange={(checked) => {
-                        setIsRecurringExpense(checked === true);
-                        if (checked === true) setReceiptFile(null);
-                      }}
-                    />
-                    <label htmlFor="recurring-expense" className="text-sm font-medium leading-none">
-                      Repeat monthly
-                    </label>
-                  </div>
-
-                  {isRecurringExpense && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label>First run</Label>
-                        <Input type="date" value={recurringStartDate} onChange={(e) => setRecurringStartDate(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Day</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          max="31"
-                          placeholder="Auto"
-                          value={recurringDayOfMonth}
-                          onChange={(e) => setRecurringDayOfMonth(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-2 pt-4 border-t">
-                  <Label>Receipt photo</Label>
-                  <Input
-                    key={isRecurringExpense ? "receipt-disabled" : "receipt-enabled"}
-                    type="file"
-                    accept="image/*"
-                    disabled={isRecurringExpense}
-                    onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
-                  />
-                </div>
-
-                <Button type="submit" className="w-full mt-4" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
-                  {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : isRecurringExpense ? "Save Monthly Expense" : "Save Expense"}
-                </Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-
-          {/* SETTLE UP MODAL */}
-          <Dialog open={isSettleModalOpen} onOpenChange={setIsSettleModalOpen}>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Settle Up</DialogTitle></DialogHeader>
-              <form onSubmit={handleSettleUp} className="space-y-4 pt-4">
-                <div className="bg-zinc-100 p-3 rounded-md text-sm text-zinc-600 mb-4">
-                  <strong>{settlePayer?.name}</strong> is paying <strong>{settleReceiver?.name}</strong>.
-                </div>
-                <div className="space-y-2">
-                  <Label>Payment Amount ($)</Label>
-                  <Input 
-                    type="number" 
-                    step="0.01" 
-                    min="0.01"
-                    value={settleAmount} 
-                    onChange={(e) => setSettleAmount(e.target.value)} 
-                  />
-                </div>
-                <Button type="submit" className="w-full">Record Payment</Button>
-              </form>
-            </DialogContent>
-          </Dialog>
-
+          <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border" onClick={() => window.location.href = api.getExportUrl(groupId)} title="Export CSV">
+            <Download className="w-5 h-5 text-muted-foreground" />
+          </Button>
+          <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border hover:border-red-200 hover:bg-red-50" onClick={handleDeleteGroup} title="Delete Group">
+            <Trash2 className="w-5 h-5 text-red-500" />
+          </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        
-        {/* LEFT COLUMN: ACTIVITY FEED */}
-        <div className="md:col-span-2 space-y-4">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <Receipt className="w-5 h-5 text-zinc-400" /> Recent Activity
-          </h2>
-          <Card>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {feed.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center text-zinc-500 py-8">
-                      No expenses yet. Add a member and an expense to get started!
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  feed.map((item, index) => {
-                    const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
-                    return (
-                      <TableRow key={index}>
-                        <TableCell>
-                          <Badge variant={item.type === "settlement" ? "secondary" : "default"}>
-                            {item.type === "settlement" ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          <div className="flex items-center gap-2">
-                            <span>{item.description}</span>
-                            {item.receipt_url && (
-                              <a href={receiptHref} target="_blank" rel="noreferrer" className="text-zinc-500 hover:text-zinc-900" title="Open receipt">
-                                <Paperclip className="w-4 h-4" />
-                              </a>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          ${item.amount.toFixed(2)}
-                        </TableCell>
-                        <TableCell>
-                          {item.type === "expense" && (
-                            <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-400 hover:text-red-500 h-8 w-8">
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </Card>
-        </div>
+      {/* MODALS */}
+      <Dialog open={isMemberModalOpen} onOpenChange={setIsMemberModalOpen}>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl">
+          <DialogHeader><DialogTitle className="text-xl">Add a new member</DialogTitle></DialogHeader>
+          <form onSubmit={handleAddMember} className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+            </div>
+            <Button type="submit" className="w-full rounded-full h-12">Add to Group</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
 
-        {/* RIGHT COLUMN: SETTLEMENTS */}
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <ArrowRightLeft className="w-5 h-5 text-zinc-400" /> How to Settle Up
-          </h2>
-          
-          {settlements.length === 0 ? (
-            <Card className="p-6 text-center text-zinc-500 bg-white border border-dashed">
-              All settled up! No debts.
-            </Card>
-          ) : (
-            <div className="space-y-3">
-              {settlements.map((s, index) => (
-                <Card key={index} className="p-4 border-l-4 border-l-zinc-900 shadow-sm">
-                  <div className="flex justify-between items-center mb-3">
-                    <div>
-                      <span className="font-semibold text-zinc-900">{s.payer_name}</span>
-                      <span className="text-zinc-500 mx-2">owes</span>
-                      <span className="font-semibold text-zinc-900">{s.receiver_name}</span>
+      <Dialog open={isViewMembersModalOpen} onOpenChange={setIsViewMembersModalOpen}>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader><DialogTitle className="text-xl">Group Members</DialogTitle></DialogHeader>
+          <div className="overflow-y-auto pr-2 -mr-2 pt-4 space-y-3">
+            {group.members.length === 0 ? (
+              <p className="text-muted-foreground text-center py-4">No members yet.</p>
+            ) : (
+              group.members.map((member) => (
+                <div key={member.id} className="flex justify-between items-center bg-secondary/30 p-3 rounded-2xl border border-border hover:bg-secondary/50 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shadow-sm">
+                      {member.name.charAt(0).toUpperCase()}
                     </div>
-                    <div className="font-mono font-bold text-lg text-red-600">
-                      ${s.amount.toFixed(2)}
-                    </div>
+                    <span className="font-semibold text-foreground truncate max-w-[150px]">{member.name}</span>
                   </div>
-                  {/* NEW: The button now opens the Settle Modal! */}
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    className="w-full"
-                    onClick={() => openSettleModal(s.payer_name, s.payer_id, s.receiver_name, s.receiver_id, s.amount)}
-                  >
-                    Make a Payment
+                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-full w-9 h-9 p-0 shadow-sm" onClick={() => handleRemoveMember(member.id, member.name)} title="Remove member">
+                    <Trash2 className="w-4 h-4" />
                   </Button>
-                </Card>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isExpenseModalOpen} onOpenChange={setIsExpenseModalOpen}>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="text-xl">Record an expense</DialogTitle></DialogHeader>
+          <form onSubmit={handleAddExpense} className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Description</Label>
+              <Input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="Dinner at Joe's" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+            </div>
+            <div className="space-y-2">
+              <Label>Amount ($)</Label>
+              <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="0.00" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+            </div>
+            <div className="space-y-2">
+              <Label>Who Paid?</Label>
+              <Select value={payerId} onValueChange={setPayerId}>
+                <SelectTrigger className="rounded-full h-12 px-4 bg-secondary/50 border-border"><SelectValue placeholder="Select a member" /></SelectTrigger>
+                <SelectContent position="popper" className="rounded-2xl border-0 shadow-xl w-[var(--radix-select-trigger-width)]">
+                  <SelectGroup className="p-2">
+                    {group.members.map((m) => (
+                      <SelectItem key={m.id} value={m.id} className="rounded-xl py-2.5 px-3">{m.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Custom Split Toggle */}
+            <div className="space-y-4 pt-4 border-t border-border mt-4">
+              <div className="flex justify-between items-center">
+                <Label>How to split?</Label>
+                <div className="flex gap-2 bg-secondary p-1 rounded-full">
+                  <Button type="button" variant={splitType === "equal" ? "default" : "ghost"} size="sm" className="rounded-full h-8" onClick={() => setSplitType("equal")}>Equal</Button>
+                  <Button type="button" variant={splitType === "exact" ? "default" : "ghost"} size="sm" className="rounded-full h-8" onClick={() => setSplitType("exact")}>Exact</Button>
+                </div>
+              </div>
+
+              {splitType === "equal" ? (
+                <div className="grid grid-cols-2 gap-3 mt-2 bg-secondary/50 p-4 rounded-3xl border border-border">
+                  {group.members.map((m) => (
+                    <div key={m.id} className="flex items-center space-x-3">
+                      <Checkbox
+                        id={`member-${m.id}`}
+                        checked={involvedMembers.includes(m.id)}
+                        onCheckedChange={() => toggleInvolvedMember(m.id)}
+                        className="rounded-md"
+                      />
+                      <label htmlFor={`member-${m.id}`} className="text-sm font-medium leading-none cursor-pointer">
+                        {m.name}
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3 mt-2 bg-secondary/50 p-4 rounded-3xl border border-border">
+                  {group.members.map((m) => (
+                    <div key={m.id} className="flex items-center space-x-3">
+                      <Label className="w-24 truncate">{m.name}</Label>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={customSplits[m.id] || ""}
+                        onChange={(e) => setCustomSplits({ ...customSplits, [m.id]: e.target.value })}
+                        className="rounded-full h-10 bg-card border-border"
+                      />
+                    </div>
+                  ))}
+                  <div className="text-xs font-semibold text-right text-muted-foreground mt-2">
+                    Total: ${Object.values(customSplits).reduce((sum, val) => sum + (parseFloat(val) || 0), 0).toFixed(2)} / ${parseFloat(expenseAmount || "0").toFixed(2)}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4 pt-4 border-t border-border">
+              <div className="flex items-center gap-3">
+                <Checkbox
+                  id="recurring-expense"
+                  checked={isRecurringExpense}
+                  onCheckedChange={(checked) => {
+                    setIsRecurringExpense(checked === true);
+                    if (checked === true) setReceiptFile(null);
+                  }}
+                  className="rounded-md"
+                />
+                <label htmlFor="recurring-expense" className="text-sm font-medium leading-none cursor-pointer">
+                  Repeat monthly
+                </label>
+              </div>
+
+              {isRecurringExpense && (
+                <div className="grid grid-cols-2 gap-4 bg-secondary/50 p-4 rounded-3xl border border-border">
+                  <div className="space-y-2">
+                    <Label>First run</Label>
+                    <Input type="date" value={recurringStartDate} onChange={(e) => setRecurringStartDate(e.target.value)} className="rounded-full h-10 bg-card border-border" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Day</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      max="31"
+                      placeholder="Auto"
+                      value={recurringDayOfMonth}
+                      onChange={(e) => setRecurringDayOfMonth(e.target.value)}
+                      className="rounded-full h-10 bg-card border-border"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 pt-4 border-t border-border">
+              <Label>Receipt photo</Label>
+              <div className={`relative flex items-center h-12 bg-secondary/50 border border-border rounded-full px-2 overflow-hidden transition-opacity ${isRecurringExpense ? "opacity-50 cursor-not-allowed" : "hover:bg-secondary/80"}`}>
+                <div className="bg-primary text-primary-foreground shadow-sm shadow-primary/20 font-semibold text-sm px-4 py-1.5 rounded-full mr-3 pointer-events-none">
+                  Choose file
+                </div>
+                <span className="text-sm text-muted-foreground truncate pointer-events-none pr-4">
+                  {receiptFile ? receiptFile.name : "No file chosen"}
+                </span>
+                <input
+                  key={isRecurringExpense ? "receipt-disabled" : "receipt-enabled"}
+                  type="file"
+                  accept="image/*"
+                  disabled={isRecurringExpense}
+                  onChange={(e) => setReceiptFile(e.target.files?.[0] ?? null)}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            <Button type="submit" size="lg" className="w-full mt-6 rounded-full h-12 text-md" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
+              {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : isRecurringExpense ? "Save Monthly Expense" : "Save Expense"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isSettleModalOpen} onOpenChange={setIsSettleModalOpen}>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl">
+          <DialogHeader><DialogTitle className="text-xl">Settle Up</DialogTitle></DialogHeader>
+          <form onSubmit={handleSettleUp} className="space-y-6 pt-4">
+            <div className="bg-primary/5 p-4 rounded-3xl text-sm text-primary flex items-center justify-center gap-3">
+              <span className="font-bold text-lg">{settlePayer?.name}</span>
+              <ArrowRightLeft className="w-5 h-5 opacity-50" />
+              <span className="font-bold text-lg">{settleReceiver?.name}</span>
+            </div>
+            <div className="space-y-2 text-center">
+              <Label className="text-muted-foreground">Payment Amount ($)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={settleAmount}
+                onChange={(e) => setSettleAmount(e.target.value)}
+                className="rounded-full h-16 text-3xl font-bold text-center bg-secondary/50 border-border focus-visible:ring-primary shadow-inner"
+              />
+            </div>
+            <Button type="submit" size="lg" className="w-full rounded-full h-12 text-lg">Record Payment</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <div className="space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-150">
+
+        {/* SETTLEMENTS */}
+        <div className="space-y-5">
+          <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
+            <div className="bg-indigo-100 p-2 rounded-xl text-primary"><ArrowRightLeft className="w-5 h-5" /></div>
+            How to Settle Up
+          </h2>
+
+          {settlements.length === 0 ? (
+            <div className="p-10 text-center text-muted-foreground bg-card/60 rounded-[2.5rem] border border-dashed border-border">
+              <div className="bg-emerald-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              </div>
+              <p className="font-medium text-lg">All settled up!</p>
+              <p className="text-sm mt-1">No debts among members.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {settlements.map((s, index) => (
+                <div key={index} className="overflow-hidden border border-border shadow-md shadow-zinc-200/50 rounded-[2.5rem] bg-card hover:shadow-lg transition-shadow">
+                  <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
+                    <div className="flex items-center gap-5">
+                      <div className="w-14 h-14 rounded-[1.5rem] bg-red-50 flex items-center justify-center shrink-0">
+                        <ArrowRightLeft className="w-6 h-6 text-red-500" />
+                      </div>
+                      <div>
+                        <div className="text-base text-muted-foreground">
+                          <span className="font-bold text-foreground">{s.payer_name}</span> owes <span className="font-bold text-foreground">{s.receiver_name}</span>
+                        </div>
+                        <div className="font-extrabold text-3xl text-red-600 tracking-tight mt-1">
+                          ${s.amount.toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      size="lg"
+                      className="rounded-full w-full sm:w-auto font-semibold px-8"
+                      onClick={() => openSettleModal(s.payer_name, s.payer_id, s.receiver_name, s.receiver_id, s.amount)}
+                    >
+                      Settle
+                    </Button>
+                  </div>
+                </div>
               ))}
             </div>
           )}
+        </div>
 
-          <div className="pt-4 space-y-3">
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <CalendarClock className="w-5 h-5 text-zinc-400" /> Monthly Expenses
-            </h2>
-            {recurringExpenses.length === 0 ? (
-              <Card className="p-5 text-center text-zinc-500 bg-white border border-dashed">
-                No monthly expenses.
-              </Card>
-            ) : (
-              <div className="space-y-3">
-                {recurringExpenses.map((expense) => (
-                  <Card key={expense.id} className="p-4 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-semibold text-zinc-900">{expense.description}</div>
-                        <div className="text-sm text-zinc-500">Paid by {expense.payer_name} on day {expense.day_of_month}</div>
-                      </div>
-                      <div className="font-mono font-bold">${expense.amount.toFixed(2)}</div>
-                    </div>
-                    <div className="mt-2 text-xs text-zinc-500">Next: {expense.next_run_on}</div>
-                  </Card>
-                ))}
+        {/* RECENT ACTIVITY */}
+        <div className="space-y-5">
+          <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
+            <div className="bg-indigo-100 p-2 rounded-xl text-primary"><Receipt className="w-5 h-5" /></div>
+            Recent Activity
+          </h2>
+
+          <div className="space-y-4">
+            {feed.length === 0 ? (
+              <div className="p-10 text-center text-muted-foreground bg-card/60 rounded-[2.5rem] border border-dashed border-border">
+                <Receipt className="w-12 h-12 text-zinc-300 mx-auto mb-4" />
+                <p className="font-medium">No expenses yet.</p>
+                <p className="text-sm mt-1">Add a member and an expense to get started!</p>
               </div>
+            ) : (
+              feed.map((item, index) => {
+                const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
+                const isPayment = item.type === "settlement";
+                return (
+                  <div key={index} className="flex items-center justify-between p-5 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 ${isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                        {isPayment ? <ArrowRightLeft className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
+                      </div>
+                      <div>
+                        <div className="font-bold text-foreground flex items-center gap-2 text-base">
+                          {item.description}
+                          {item.receipt_url && (
+                            <a href={receiptHref} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary transition-colors" title="Open receipt">
+                              <Paperclip className="w-4 h-4" />
+                            </a>
+                          )}
+                        </div>
+                        <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider">
+                          {isPayment ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className={`font-extrabold text-lg tracking-tight ${isPayment ? 'text-emerald-600' : 'text-foreground'}`}>
+                        ${item.amount.toFixed(2)}
+                      </div>
+                      {item.type === "expense" && (
+                        <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-300 hover:text-red-500 hover:bg-red-50 w-10 h-10 rounded-full shrink-0">
+                          <Trash2 className="w-5 h-5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>
 
+        {/* MONTHLY EXPENSES */}
+        {recurringExpenses.length > 0 && (
+          <div className="space-y-5 pt-4">
+            <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
+              <div className="bg-orange-100 p-2 rounded-xl text-orange-600"><CalendarClock className="w-5 h-5" /></div>
+              Monthly Expenses
+            </h2>
+            <div className="space-y-4">
+              {recurringExpenses.map((expense) => (
+                <div key={expense.id} className="flex items-center justify-between p-5 bg-card border border-border rounded-[2rem] shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-[1.25rem] bg-orange-50 flex items-center justify-center shrink-0">
+                      <CalendarClock className="w-5 h-5 text-orange-500" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-foreground text-base">{expense.description}</div>
+                      <div className="text-xs font-medium text-muted-foreground mt-1">Paid by {expense.payer_name} on day {expense.day_of_month}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-extrabold text-lg text-foreground tracking-tight">${expense.amount.toFixed(2)}</div>
+                    <div className="text-xs font-semibold text-muted-foreground mt-1">Next: {expense.next_run_on}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

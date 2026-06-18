@@ -75,6 +75,9 @@ export const api = {
     
   addMemberToGroup: (groupId: string, userId: string) => 
     fetchAPI(`/groups/${groupId}/members`, { method: "POST", body: JSON.stringify({ user_id: userId }) }),
+    
+  removeMemberFromGroup: (groupId: string, userId: string) => 
+    fetchAPI(`/groups/${groupId}/members/${userId}`, { method: "DELETE" }),
 
   // Ledger Actions
   createExpense: (payload: ExpensePayload) => 
