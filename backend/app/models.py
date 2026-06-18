@@ -34,6 +34,7 @@ class Group(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
     currency = Column(String, default="USD", nullable=False)  # Currency Loophole Fix
+    creator_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True) # Nullable for grandfathering
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships

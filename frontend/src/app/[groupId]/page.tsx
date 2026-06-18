@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { WelcomeModal } from "@/components/welcome-modal";
 import { API_BASE_URL, api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -76,9 +77,11 @@ export default function GroupDashboard() {
   const [settlements, setSettlements] = useState<SuggestedSettlement[]>([]);
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Modal States
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
   const [isViewMembersModalOpen, setIsViewMembersModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isSettleModalOpen, setIsSettleModalOpen] = useState(false);
@@ -120,8 +123,9 @@ export default function GroupDashboard() {
       if (loadedGroup?.members) {
         setInvolvedMembers(loadedGroup.members.map((m) => m.id));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to load group data", error);
+      setError(error.message || "Failed to load group.");
     } finally {
       setIsLoading(false);
     }
@@ -288,6 +292,28 @@ export default function GroupDashboard() {
   };
 
   // --- Render ---
+  if (error) return (
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background">
+      <div className="bg-destructive/10 text-destructive border border-destructive/20 p-8 rounded-[2rem] max-w-md text-center space-y-4 shadow-xl">
+        <h2 className="text-2xl font-black">Access Denied</h2>
+        <p className="font-medium">{error}</p>
+        <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
+          <Button onClick={() => window.location.href = '/'} variant="outline" className="rounded-full shadow-sm h-12 px-6">Go Home</Button>
+          <Button onClick={() => setIsWelcomeModalOpen(true)} variant="default" className="rounded-full shadow-lg h-12 px-6">Identify Yourself</Button>
+        </div>
+      </div>
+      <WelcomeModal 
+        isOpen={isWelcomeModalOpen} 
+        onClose={() => setIsWelcomeModalOpen(false)} 
+        onSuccess={() => {
+          setIsWelcomeModalOpen(false);
+          setError(null);
+          setIsLoading(true);
+          loadData();
+        }} 
+      />
+    </div>
+  );
   if (isLoading) return <div className="p-8 text-center text-muted-foreground animate-pulse">Loading ledger...</div>;
   if (!group) return <div className="p-8 text-center text-red-500">Group not found.</div>;
 

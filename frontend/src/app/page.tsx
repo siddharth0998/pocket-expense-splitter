@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Wallet, ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { WelcomeModal } from "@/components/welcome-modal";
 import {
   Accordion,
   AccordionContent,
@@ -28,6 +29,7 @@ export default function Home() {
   const [groupName, setGroupName] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
 
   useEffect(() => {
     const fetchGroups = async () => {
@@ -45,6 +47,16 @@ export default function Home() {
     e.preventDefault();
     if (!groupName.trim()) return;
 
+    // Check identity before creating group
+    if (!localStorage.getItem("pocket_user_id")) {
+      setIsWelcomeModalOpen(true);
+      return;
+    }
+
+    createGroup();
+  };
+
+  const createGroup = async () => {
     try {
       setIsLoading(true);
       // 1. Create the Group in the Python Backend
@@ -266,6 +278,15 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      <WelcomeModal 
+        isOpen={isWelcomeModalOpen} 
+        onClose={() => setIsWelcomeModalOpen(false)} 
+        onSuccess={() => {
+          setIsWelcomeModalOpen(false);
+          createGroup();
+        }} 
+      />
     </div>
   );
 }

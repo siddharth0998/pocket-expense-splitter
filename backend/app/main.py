@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, inspect, text
@@ -37,9 +37,15 @@ def ensure_schema_compatibility():
         "generated_for_month": "VARCHAR",
     }
     missing_columns = [name for name in column_sql if name not in existing_columns]
+    
+    group_columns = {column["name"] for column in inspector.get_columns("groups")}
+    missing_group_columns = ["creator_id"] if "creator_id" not in group_columns else []
+
     with engine.begin() as connection:
         for column_name in missing_columns:
             connection.execute(text(f"ALTER TABLE expenses ADD COLUMN {column_name} {column_sql[column_name]}"))
+        for column_name in missing_group_columns:
+            connection.execute(text(f"ALTER TABLE groups ADD COLUMN creator_id VARCHAR"))
         connection.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_expense_month "
             "ON expenses (recurring_template_id, generated_for_month) "
@@ -236,11 +242,19 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     return {"id": db_user.id, "name": db_user.name}
 
 @app.post("/groups/")
-def create_group(group: GroupCreate, db: Session = Depends(get_db)):
-    db_group = models.Group(name=group.name)
+def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    db_group = models.Group(name=group.name, creator_id=x_user_id)
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
+    
+    # If the creator exists, automatically add them as a member
+    if x_user_id:
+        user = db.query(models.User).filter(models.User.id == x_user_id).first()
+        if user:
+            db_group.members.append(user)
+            db.commit()
+            
     return {"id": db_group.id, "name": db_group.name}
 
 @app.get("/groups/")
@@ -249,8 +263,28 @@ def get_all_groups(db: Session = Depends(get_db)):
     groups = db.query(models.Group).all()
     return [{"id": g.id, "name": g.name, "currency": g.currency} for g in groups]
 
+def require_group_access(group_id: str, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+        
+    if group.creator_id is None:
+        return group
+        
+    if not x_user_id:
+        raise HTTPException(status_code=403, detail="Access Denied: Please identify yourself to view this group.")
+        
+    if x_user_id == group.creator_id:
+        return group
+        
+    member_ids = [m.id for m in group.members]
+    if x_user_id in member_ids:
+        return group
+        
+    raise HTTPException(status_code=403, detail="Access Denied: You are not a member of this private group.")
+
 @app.get("/groups/{group_id}")
-def get_group_details(group_id: str, db: Session = Depends(get_db)):
+def get_group_details(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     """Fetches group details and a list of its current members."""
     process_due_recurring_expenses(group_id, db)
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
@@ -264,7 +298,7 @@ def get_group_details(group_id: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/groups/{group_id}/members")
-def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depends(get_db)):
+def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     
@@ -275,8 +309,44 @@ def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depe
     db.commit()
     return {"message": f"Added {user.name} to {group.name}"}
 
+@app.delete("/groups/{group_id}/members/{user_id}")
+def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    
+    if not group or not user:
+        raise HTTPException(status_code=404, detail="Group or User not found")
+        
+    if user not in group.members:
+        raise HTTPException(status_code=400, detail="User is not a member of this group")
+
+    # Calculate net balance to ensure they don't owe or aren't owed money
+    expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
+    settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
+    
+    balance = 0.0
+    for ex in expenses:
+        if ex.payer_id == user_id:
+            balance += ex.amount
+        for split in ex.splits:
+            if split.user_id == user_id:
+                balance -= split.amount_owed
+                
+    for st in settlements:
+        if st.payer_id == user_id:
+            balance += st.amount
+        if st.receiver_id == user_id:
+            balance -= st.amount
+            
+    if abs(balance) > 0.01:
+        raise HTTPException(status_code=400, detail="Cannot leave group with an unsettled balance. Please settle up first.")
+        
+    group.members.remove(user)
+    db.commit()
+    return {"message": f"Removed {user.name} from {group.name}"}
+
 @app.delete("/groups/{group_id}")
-def delete_group(group_id: str, db: Session = Depends(get_db)):
+def delete_group(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -377,7 +447,7 @@ def create_recurring_expense(template: RecurringExpenseCreate, db: Session = Dep
     }
 
 @app.get("/groups/{group_id}/recurring-expenses")
-def get_recurring_expenses(group_id: str, db: Session = Depends(get_db)):
+def get_group_recurring_expenses(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     process_due_recurring_expenses(group_id, db)
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
@@ -439,7 +509,7 @@ def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db
     return {"message": "Settlement recorded"}
 
 @app.get("/groups/{group_id}/feed")
-def get_group_feed(group_id: str, db: Session = Depends(get_db)):
+def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     """Returns a chronologically sorted audit trail of all expenses and settlements."""
     process_due_recurring_expenses(group_id, db)
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
@@ -488,7 +558,7 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db)):
 
 # API Endpoints: The Core Math Algorithm
 @app.get("/groups/{group_id}/settlements")
-def get_suggested_settlements(group_id: str, db: Session = Depends(get_db)):
+def get_suggested_settlements(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     """Runs the Greedy Netting Algorithm, factoring in both expenses AND past settlements."""
     process_due_recurring_expenses(group_id, db)
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
@@ -527,7 +597,7 @@ def get_suggested_settlements(group_id: str, db: Session = Depends(get_db)):
     return {"settlements": result}
 
 @app.get("/groups/{group_id}/export.csv")
-def export_group_activity_csv(group_id: str, db: Session = Depends(get_db)):
+def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
     """Exports the group's audit trail as CSV."""
     process_due_recurring_expenses(group_id, db)
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
