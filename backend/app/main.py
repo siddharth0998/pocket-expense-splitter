@@ -406,7 +406,16 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/groups/")
 def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
-    db_group = models.Group(name=group.name, creator_id=x_user_id)
+    import re
+    import uuid
+    # Generate friendly slug
+    slug = re.sub(r'[^a-zA-Z0-9\s-]', '', group.name).strip()
+    slug = re.sub(r'[\s-]+', '-', slug).lower()
+    if not slug:
+        slug = "group"
+    group_id = f"{slug}-{uuid.uuid4().hex[:6]}"
+    
+    db_group = models.Group(id=group_id, name=group.name, creator_id=x_user_id)
     db.add(db_group)
     db.commit()
     db.refresh(db_group)

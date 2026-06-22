@@ -75,7 +75,7 @@ export default function Home() {
       const group = await api.createGroup(groupName);
 
       // 2. Redirect the user to their new Group Dashboard
-      router.push(`/${group.id}`);
+      router.push(`/groups/${group.id}`);
     } catch (error) {
       console.error("Failed to create group:", error);
       alert("Failed to create group. Is your Python backend running?");
@@ -90,9 +90,7 @@ export default function Home() {
       {/* HEADER */}
       <header className="w-full flex justify-between items-center p-4 md:px-8 absolute top-0 z-50">
         <div className="flex items-center gap-2 font-bold text-xl text-foreground">
-          <div className="bg-primary p-2 rounded-xl">
-            <Wallet className="text-primary-foreground w-5 h-5" />
-          </div>
+          <img src="/logo.png" alt="Splitvero Logo" className="w-8 h-8" />
           Splitvero
         </div>
         <div className="flex items-center gap-4">
@@ -102,8 +100,8 @@ export default function Home() {
               <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground text-xs font-bold px-2 py-1 bg-secondary rounded-md transition-colors">Sign Out</button>
             </div>
           ) : (
-            <button 
-              onClick={() => { setPendingAction("login"); setIsWelcomeModalOpen(true); }} 
+            <button
+              onClick={() => { setPendingAction("login"); setIsWelcomeModalOpen(true); }}
               className="text-sm font-bold px-4 py-2 bg-primary text-primary-foreground rounded-[1rem] hover:bg-primary/90 transition-colors shadow-sm"
             >
               Log In
@@ -120,9 +118,7 @@ export default function Home() {
         <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none" />
 
         <div className="text-center mb-10 z-10 animate-in fade-in slide-in-from-bottom-4 duration-1000 max-w-2xl">
-          <div className="mx-auto bg-primary w-16 h-16 rounded-[1.5rem] flex items-center justify-center mb-6 shadow-lg shadow-primary/20 rotate-3">
-            <Wallet className="text-primary-foreground w-8 h-8 -rotate-3" />
-          </div>
+
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-foreground mb-6">
             Never wonder who <br className="hidden md:block" /> owes whom again.
           </h1>
@@ -162,7 +158,7 @@ export default function Home() {
                       key={g.id}
                       variant="outline"
                       className="w-full justify-between h-auto py-4 px-5 rounded-[1.5rem] border-border hover:border-primary/30 hover:bg-primary/5 transition-all text-foreground"
-                      onClick={() => router.push(`/${g.id}`)}
+                      onClick={() => router.push(`/groups/${g.id}`)}
                     >
                       <span className="font-medium truncate text-base">{g.name}</span>
                       <ChevronRight className="w-5 h-5 text-muted-foreground" />
@@ -296,9 +292,7 @@ export default function Home() {
       <footer className="bg-card border-t border-border py-12 px-4 mt-auto">
         <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-2 font-bold text-xl text-foreground">
-            <div className="bg-primary/10 p-2 rounded-xl">
-              <Wallet className="text-primary w-5 h-5" />
-            </div>
+            <img src="/logo.png" alt="Splitvero Logo" className="w-6 h-6 opacity-80 grayscale" />
             Splitvero
           </div>
           <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">

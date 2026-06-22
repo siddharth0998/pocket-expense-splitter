@@ -89,9 +89,7 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <div className="mx-auto bg-primary w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-lg shadow-primary/20 rotate-3">
-              <Wallet className="text-primary-foreground w-8 h-8 -rotate-3" />
-            </div>
+            <img src="/logo.png" alt="Splitvero Logo" className="w-16 h-16 mx-auto" />
             <DialogTitle className="text-2xl font-extrabold tracking-tight">
               {step === 1 ? "Who are you?" : "Check your email"}
             </DialogTitle>

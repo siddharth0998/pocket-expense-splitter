@@ -1,44 +1,45 @@
-# Pocket - Roommate Expense Splitter
+<div align="center">
+  <img src="frontend/public/logo.png" alt="Splitvero Logo" width="120" />
+  <h1>Splitvero</h1>
+  <p><strong>A focused, beautiful, full-stack expense splitter for roommates and small groups.</strong></p>
+</div>
 
-Pocket is a focused full-stack expense splitter for roommates and small groups. It answers the one question people care about most:
-
+Splitvero answers the one question people care about most:
 > Who owes whom, and how much?
 
-The app supports equal and unequal splits, keeps a persistent audit trail, and minimizes settlement transactions so the group can settle up with the fewest payments possible.
+The app supports equal and unequal splits, keeps a persistent audit trail, and mathematically minimizes settlement transactions so your group can settle up with the fewest payments possible.
 
-## Live Demo
+## 🚀 Live Application
 
-Deployed on an AWS EC2 instance.
+- **Web App:** [https://splitvero.com](https://splitvero.com)
+- **Tech Stack:** Next.js, FastAPI, PostgreSQL, Docker, AWS EC2, Caddy
 
-- Web app: `http://15.134.36.204:3000`
-- Backend API docs: `http://15.134.36.204:8000/docs`
+## ✨ Key Features
 
-## Highlights
+- **Email OTP & Google Auth:** Secure, passwordless login using Resend for transactional emails and Google OAuth.
+- **Friendly URLs:** Beautiful, RESTful URLs for your groups (e.g., `splitvero.com/groups/trip-to-hawaii-a1b2c3`).
+- **Equal and Unequal Splits:** Split an expense evenly or enter exact per-person amounts.
+- **Netting Algorithm:** Automatically calculates the minimum number of transactions required to settle all debts.
+- **Audit Trail:** Every expense, settlement, and receipt is permanently recorded in the group feed.
+- **Monthly Recurring Bills:** Mark rent, internet, or other repeat bills as monthly, and the server automatically generates them on the due date.
+- **Receipt Uploads:** Attach photo evidence to any expense.
+- **CSV Export:** Download a complete spreadsheet of your group's financial activity.
 
-- **Groups and members**: Create a group, add members, and manage a shared ledger.
-- **Equal and unequal splits**: Split an expense evenly or enter exact per-person amounts.
-- **Minimized settlement view**: Net balances across the whole group so chained debts collapse into fewer payments.
-- **Real settle-up action**: Payments are stored as settlement records and reduce balances immediately.
-- **Audit trail**: Expenses, generated recurring expenses, settlements, and receipts stay visible in group activity.
-- **Monthly recurring expenses**: Mark rent, internet, or other repeat bills as monthly.
-- **Receipt photo upload**: Attach a receipt image to a one-time expense.
-- **CSV export**: Download group activity for backup or reconciliation.
-
-## Tech Stack
+## 🛠 Tech Stack
 
 | Layer | Technology |
 | --- | --- |
-| Frontend | Next.js, React, TypeScript, Tailwind CSS, shadcn/ui, Lucide icons |
-| Backend | FastAPI, SQLAlchemy, Pydantic |
-| Database | PostgreSQL |
-| Local infra | Docker Compose for Postgres and the API |
+| **Frontend** | Next.js (App Router), React, TypeScript, Tailwind CSS, shadcn/ui |
+| **Backend** | Python, FastAPI, SQLAlchemy, Pydantic |
+| **Database** | PostgreSQL |
+| **Authentication**| Resend (SMTP Email OTP), Google OAuth |
+| **Infrastructure**| Docker Compose, AWS EC2, Caddy Reverse Proxy |
 
-## How The Netting Algorithm Works
+## 🧮 How The Netting Algorithm Works
 
-Pocket converts every ledger item into a net balance per member.
-
-- If someone paid more than their share, they become a creditor.
-- If someone owes more than they paid, they become a debtor.
+Splitvero converts every ledger item into a net balance per member.
+- If someone paid more than their share, they become a **creditor**.
+- If someone owes more than they paid, they become a **debtor**.
 - Past settlements are included in the same balance math.
 - The algorithm repeatedly matches the largest debtor with the largest creditor until everyone is balanced.
 
@@ -50,7 +51,7 @@ Example:
 | Bob | -$20 |
 | Charlie | -$30 |
 
-Pocket suggests:
+Splitvero suggests:
 
 ```text
 Bob -> Alice: $20
@@ -59,12 +60,10 @@ Charlie -> Alice: $30
 
 This avoids unnecessary chains like Bob paying Charlie and Charlie paying Alice.
 
-## Stretch Goals Implemented
+## 🌟 Advanced Features Implemented
 
 ### Monthly Recurring Expenses
-
-When **Repeat monthly** is enabled on the expense form, Pocket stores a recurring expense template with:
-
+When **Repeat monthly** is enabled on the expense form, Splitvero stores a recurring expense template with:
 - payer
 - amount
 - description
@@ -72,83 +71,39 @@ When **Repeat monthly** is enabled on the expense form, Pocket stores a recurrin
 - day of month
 - next run date
 
-Whenever a group is opened, the backend checks active recurring templates. If a template is due, Pocket creates a normal expense row for that month and advances the next run date. If the app has not been opened for multiple months, it catches up month by month.
+Whenever a group is opened, the backend checks active recurring templates. If a template is due, Splitvero creates a normal expense row for that month and advances the next run date. If the app has not been opened for multiple months, it catches up month by month.
 
 Generated expenses use `recurring_template_id` and `generated_for_month` so a month cannot be generated twice.
 
 ### Receipt Uploads
-
 One-time expenses can include a receipt image. The backend stores the uploaded file under `backend/uploads/receipts` and saves the receipt URL on the expense. The activity feed shows a paperclip link when a receipt is available.
 
 ### CSV Export
+Each group has a CSV export endpoint (`GET /groups/{group_id}/export.csv`). The export includes date, type, description, amount, payer, receiver, receipt URL, and recurring month.
 
-Each group has a CSV export endpoint:
+## 🔒 Validation And Safety
+- Expense amounts must be positive.
+- Split totals must equal the expense amount.
+- Payers and split participants must belong to the group.
+- A settlement must be a payment from one group member to another member in the same group.
+- Expenses are soft-deleted so recalculation remains safe.
+- Groups cannot be deleted while unsettled balances remain.
+- Financial values use `Numeric(10, 2)` on the backend to avoid floating-point storage errors in the database.
 
-```text
-GET /groups/{group_id}/export.csv
-```
+## 🌐 API Overview
 
-The export includes date, type, description, amount, payer, receiver, receipt URL, and recurring month.
-
-## Local Development
-
-### Prerequisites
-
-- Docker Desktop
-- Node.js and npm
-
-### 1. Start the backend and database
-
-```bash
-docker compose up --build -d
-```
-
-This starts:
-
-- PostgreSQL on `localhost:5432`
-- FastAPI on `localhost:8000`
-
-Backend API docs:
-
-```text
-http://localhost:8000/docs
-```
-
-### 2. Start the frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend app:
-
-```text
-http://localhost:3000
-```
-
-If port `3000` is already in use, Next.js will print the alternate local URL.
-
-## Usage Walkthrough
-
-1. Create a group, for example `Apartment 4B`.
-2. Add members such as Alice, Bob, and Charlie.
-3. Add an expense and choose who paid.
-4. Select equal split or exact amounts.
-5. Optionally attach a receipt photo.
-6. For repeating bills, enable **Repeat monthly** and choose the first run date.
-7. Review **How to Settle Up** for the minimized payment list.
-8. Click **Make a Payment** to record a settlement.
-9. Use **Export CSV** to download the group audit trail.
-
-## API Overview
+FastAPI automatically generates interactive Swagger documentation for this API. 
+- **Production:** `https://api.splitvero.com/docs`
+- **Local Development:** `http://localhost:8000/docs`
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
-| `POST` | `/users/` | Create or reuse a user by email |
-| `POST` | `/groups/` | Create a group |
+| `POST` | `/users/request-otp` | Request a magic link code |
+| `POST` | `/users/verify-otp` | Verify the code and login |
+| `POST` | `/users/google-login`| Login with Google Auth |
+| `POST` | `/groups/` | Create a group with a friendly URL slug |
 | `GET` | `/groups/` | List groups |
+| `GET` | `/groups/{group_id}` | Get group details |
 | `POST` | `/groups/{group_id}/members` | Add a user to a group |
 | `POST` | `/expenses/` | Add a one-time expense |
 | `POST` | `/expenses/{expense_id}/receipt` | Upload a receipt image |
@@ -158,60 +113,49 @@ If port `3000` is already in use, Next.js will print the alternate local URL.
 | `POST` | `/settlements/` | Record a settle-up payment |
 | `GET` | `/groups/{group_id}/export.csv` | Export group activity as CSV |
 
-## Data Model
+## 💻 Local Development
 
-Core tables:
+### 1. Start the Backend & Database (Terminal 1)
 
-- `users`
-- `groups`
-- `group_members`
-- `expenses`
-- `expense_splits`
-- `settlements`
-- `recurring_expense_templates`
-- `recurring_expense_splits`
-
-Financial values use `Numeric(10, 2)` on the backend to avoid floating-point storage errors in the database.
-
-## Validation And Safety
-
-- Expense amounts must be positive.
-- Split totals must equal the expense amount.
-- Payers and split participants must belong to the group.
-- A settlement must be a payment from one group member to another member in the same group.
-- Expenses are soft-deleted so recalculation remains safe.
-- Groups cannot be deleted while unsettled balances remain.
-
-## Currency Conversion Plan
-
-For international groups, I would store every expense in two forms:
-
-- the original currency and original amount entered by the user
-- the normalized group currency amount used by the netting algorithm
-
-At expense creation time, the backend would fetch a dated exchange rate from a reliable provider and persist that exact rate with the expense. The app would never recalculate old expenses using live rates, because that would rewrite history and make the audit trail confusing. Settlement suggestions would run on normalized amounts, while the UI could still show the original amount and conversion rate for transparency.
-
-## Deployment Notes
-
-A production deployment should run:
-
-- PostgreSQL as a managed database or a persistent container volume
-- FastAPI behind HTTPS
-- Next.js with `NEXT_PUBLIC_API_URL` pointing to the deployed API
-- persistent storage for uploaded receipts, preferably object storage such as S3 instead of local disk
-
-For a simple VM deployment, install Docker, set the frontend API URL, and run the backend/database with Docker Compose.
-
-On the server, create a root `.env` file so the backend allows browser requests from the deployed frontend:
+You will need a `.env` file in the root directory with your Database and SMTP credentials.
 
 ```bash
-FRONTEND_URL=http://YOUR_EC2_PUBLIC_IP:3000
+# Start the PostgreSQL database and FastAPI server in the background
+docker compose up --build -d
 ```
+This runs PostgreSQL on `localhost:5432` and FastAPI on `localhost:8000`.
 
-Then create `frontend/.env.production` so the frontend calls the deployed backend:
+### 2. Start the Frontend (Terminal 2)
 
 ```bash
-NEXT_PUBLIC_API_URL=http://YOUR_EC2_PUBLIC_IP:8000
+# Open a new terminal tab, navigate to frontend, and start Next.js
+cd frontend
+npm install
+npm run dev
 ```
+The Next.js application will be available at `http://localhost:3000`.
 
-After changing either value, rebuild/restart the affected service.
+## 🚢 Production Deployment
+
+Splitvero is designed to be easily deployed on a single AWS EC2 instance.
+
+1. Map your domain (`splitvero.com`) to your EC2 Elastic IP.
+2. Configure **Caddy** to route traffic to `localhost:3000` (Frontend) and `localhost:8000` (Backend API).
+3. Set your production environment variables in `frontend/.env.production` and the root `.env`.
+4. Pull the latest code and deploy:
+
+```bash
+# Update the code
+git pull origin main
+
+# Restart the Backend container
+docker compose down
+docker compose up -d
+
+# Rebuild and restart the Frontend
+cd frontend
+npm install
+npm run build
+sudo fuser -k 3000/tcp  # Kill the old server
+npm start > frontend.log 2>&1 &  # Start the new server in the background
+```
