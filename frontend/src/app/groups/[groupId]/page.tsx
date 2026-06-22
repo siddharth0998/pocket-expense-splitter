@@ -417,9 +417,10 @@ export default function GroupDashboard() {
       </Dialog>
 
       <Dialog open={isExpenseModalOpen} onOpenChange={setIsExpenseModalOpen}>
-        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90vh] flex flex-col">
           <DialogHeader><DialogTitle className="text-xl">Record an expense</DialogTitle></DialogHeader>
-          <form onSubmit={handleAddExpense} className="space-y-4 pt-4">
+          <div className="overflow-y-auto pr-2 -mr-2 flex-1">
+            <form onSubmit={handleAddExpense} className="space-y-4 pt-4 pb-4">
             <div className="space-y-2">
               <Label>Description</Label>
               <Input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="Dinner at Joe's" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
@@ -552,7 +553,8 @@ export default function GroupDashboard() {
             <Button type="submit" size="lg" className="w-full mt-6 rounded-full h-12 text-md" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
               {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : isRecurringExpense ? "Save Monthly Expense" : "Save Expense"}
             </Button>
-          </form>
+            </form>
+          </div>
         </DialogContent>
       </Dialog>
 
