@@ -1,0 +1,7 @@
+splitvero.com {
+    reverse_proxy host.docker.internal:3000
+}
+
+api.splitvero.com {
+    reverse_proxy backend:8000
+}
