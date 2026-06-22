@@ -248,7 +248,7 @@ class OTPRequest(BaseModel):
 class OTPVerify(BaseModel):
     email: str
     code: str
-    name: str
+    name: Optional[str] = None
 
 def send_email(to_email: str, subject: str, html_content: str):
     smtp_user = os.getenv("SMTP_USER")
@@ -358,7 +358,8 @@ def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
     # Valid! Find or create user.
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
-        user = models.User(name=payload.name, email=email)
+        derived_name = payload.name if payload.name else email.split('@')[0].capitalize()
+        user = models.User(name=derived_name, email=email)
         db.add(user)
         db.commit()
         db.refresh(user)

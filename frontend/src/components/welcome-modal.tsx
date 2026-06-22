@@ -11,7 +11,6 @@ import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
 
 export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void; }) {
   const [step, setStep] = useState<1 | 2>(1);
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -21,7 +20,7 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !email.trim()) return;
+    if (!email.trim()) return;
 
     try {
       setIsLoading(true);
@@ -40,7 +39,7 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
 
     try {
       setIsLoading(true);
-      const user = await api.verifyOtp(email.trim().toLowerCase(), otpCode.trim(), name.trim());
+      const user = await api.verifyOtp(email.trim().toLowerCase(), otpCode.trim());
       finishLogin(user);
     } catch (error: any) {
       alert(error.message || "Invalid or expired code.");
@@ -123,17 +122,7 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
               </div>
 
               <form onSubmit={handleSendOtp} className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="name">Your Name</Label>
-                  <Input
-                    id="name"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Siddharth"
-                    className="rounded-full h-12 px-4 bg-secondary/50 border-border"
-                    required
-                  />
-                </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email Address</Label>
                   <Input

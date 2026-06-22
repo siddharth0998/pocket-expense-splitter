@@ -77,8 +77,8 @@ export const api = {
   requestOtp: (email: string) => 
     fetchAPI("/users/request-otp", { method: "POST", body: JSON.stringify({ email }) }),
     
-  verifyOtp: (email: string, code: string, name: string) => 
-    fetchAPI("/users/verify-otp", { method: "POST", body: JSON.stringify({ email, code, name }) }),
+  verifyOtp: (email: string, code: string) => 
+    fetchAPI("/users/verify-otp", { method: "POST", body: JSON.stringify({ email, code }) }),
     
   googleLogin: (credential: string) => 
     fetchAPI("/users/google-login", { method: "POST", body: JSON.stringify({ credential }) }),
