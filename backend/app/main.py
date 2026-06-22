@@ -310,6 +310,7 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
         <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
             <tr>
                 <td style="padding: 40px 40px 20px 40px; text-align: center; background-color: #4f46e5;">
+                    <img src="https://splitvero.com/logo.png" alt="Splitvero Logo" width="64" style="display: block; margin: 0 auto; margin-bottom: 16px;">
                     <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Splitvero</h1>
                 </td>
             </tr>
