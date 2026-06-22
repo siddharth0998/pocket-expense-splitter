@@ -63,8 +63,8 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
   };
 
   const finishLogin = (user: { id: string, name: string }) => {
-    localStorage.setItem("pocket_user_id", user.id);
-    localStorage.setItem("pocket_user_name", user.name);
+    localStorage.setItem("splitvero_user_id", user.id);
+    localStorage.setItem("splitvero_user_name", user.name);
     setStep(1);
     setOtpCode("");
     onSuccess();

@@ -30,7 +30,7 @@ export interface SettlementPayload {
 
 // --- Helper for Fetching ---
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
-  const userId = typeof window !== 'undefined' ? localStorage.getItem("pocket_user_id") : null;
+  const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> || {}),
@@ -52,7 +52,7 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
 }
 
 async function uploadAPI(endpoint: string, formData: FormData) {
-  const userId = typeof window !== 'undefined' ? localStorage.getItem("pocket_user_id") : null;
+  const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
   const headers: Record<string, string> = {};
   if (userId) {
     headers["X-User-Id"] = userId;

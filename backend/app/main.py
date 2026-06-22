@@ -21,7 +21,7 @@ from google.auth.transport import requests as google_requests
 from . import models, algorithm
 
 # Database Setup
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/pocket")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/splitvero")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -59,7 +59,7 @@ def ensure_schema_compatibility():
 
 ensure_schema_compatibility()
 
-app = FastAPI(title="Pocket - Expense Splitter API")
+app = FastAPI(title="Splitvero - Expense Splitter API")
 
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads")).resolve()
 RECEIPT_DIR = UPLOAD_DIR / "receipts"
@@ -267,7 +267,7 @@ def send_email(to_email: str, subject: str, html_content: str):
 
     msg = EmailMessage()
     msg['Subject'] = subject
-    msg['From'] = f"Pocket App <{smtp_from}>"
+    msg['From'] = f"Splitvero App <{smtp_from}>"
     msg['To'] = to_email
     msg.set_content("Please enable HTML to view this email.")
     msg.add_alternative(html_content, subtype='html')
@@ -304,20 +304,20 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
     <html>
     <head>
     <meta charset="utf-8">
-    <title>Pocket Verification</title>
+    <title>Splitvero Verification</title>
     </head>
     <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 0;">
         <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
             <tr>
                 <td style="padding: 40px 40px 20px 40px; text-align: center; background-color: #4f46e5;">
-                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Pocket</h1>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Splitvero</h1>
                 </td>
             </tr>
             <tr>
                 <td style="padding: 40px;">
                     <h2 style="color: #18181b; font-size: 20px; margin-top: 0; margin-bottom: 20px;">Sign in to your account</h2>
                     <p style="color: #52525b; font-size: 16px; line-height: 1.5; margin-bottom: 30px;">
-                        Use the secure verification code below to access your Pocket Expense Splitter account. This code is unique to you.
+                        Use the secure verification code below to access your Splitvero Expense Splitter account. This code is unique to you.
                     </p>
                     
                     <div style="background-color: #f4f4f5; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 30px;">
@@ -332,7 +332,7 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
             <tr>
                 <td style="padding: 20px 40px; background-color: #fafafa; border-top: 1px solid #e4e4e7; text-align: center;">
                     <p style="color: #a1a1aa; font-size: 12px; margin: 0;">
-                        &copy; 2026 Pocket Expense Splitter. All rights reserved.
+                        &copy; 2026 Splitvero Expense Splitter. All rights reserved.
                     </p>
                 </td>
             </tr>
@@ -340,7 +340,7 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
     </body>
     </html>
     """
-    send_email(email, "Pocket Verification Code", html)
+    send_email(email, "Splitvero Verification Code", html)
     return {"message": "OTP sent"}
 
 @app.post("/users/verify-otp")
@@ -488,7 +488,7 @@ def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depe
             html_content = f"""
             <div style="font-family: sans-serif; padding: 20px;">
                 <h2>You've been added to a group!</h2>
-                <p>You were just added to the group <b>{group.name}</b> on Pocket.</p>
+                <p>You were just added to the group <b>{group.name}</b> on Splitvero.</p>
                 <p>Log in with this email address to view the ledger and settle up your expenses.</p>
             </div>
             """

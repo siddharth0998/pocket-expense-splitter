@@ -136,7 +136,7 @@ export default function GroupDashboard() {
   }, [groupId]);
 
   useEffect(() => {
-    setCurrentUserId(localStorage.getItem("pocket_user_id"));
+    setCurrentUserId(localStorage.getItem("splitvero_user_id"));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData();
   }, [loadData]);

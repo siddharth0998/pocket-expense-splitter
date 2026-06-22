@@ -43,13 +43,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    setUserName(localStorage.getItem("pocket_user_name"));
+    setUserName(localStorage.getItem("splitvero_user_name"));
     fetchGroups();
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("pocket_user_id");
-    localStorage.removeItem("pocket_user_name");
+    localStorage.removeItem("splitvero_user_id");
+    localStorage.removeItem("splitvero_user_name");
     setUserName(null);
     setGroups([]);
   };
@@ -59,7 +59,7 @@ export default function Home() {
     if (!groupName.trim()) return;
 
     // Check identity before creating group
-    if (!localStorage.getItem("pocket_user_id")) {
+    if (!localStorage.getItem("splitvero_user_id")) {
       setPendingAction("create");
       setIsWelcomeModalOpen(true);
       return;
@@ -93,7 +93,7 @@ export default function Home() {
           <div className="bg-primary p-2 rounded-xl">
             <Wallet className="text-primary-foreground w-5 h-5" />
           </div>
-          Pocket
+          Splitvero
         </div>
         <div className="flex items-center gap-4">
           {userName ? (
@@ -127,7 +127,7 @@ export default function Home() {
             Never wonder who <br className="hidden md:block" /> owes whom again.
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto">
-            Struggling to keep track of shared expenses? Pocket makes splitting costs simple, fair, and mathematically perfect.
+            Struggling to keep track of shared expenses? Splitvero makes splitting costs simple, fair, and mathematically perfect.
           </p>
         </div>
 
@@ -260,9 +260,9 @@ export default function Home() {
         </div>
         <Accordion type="single" collapsible className="w-full">
           <AccordionItem value="item-1">
-            <AccordionTrigger className="text-left text-lg">Is Pocket free to use?</AccordionTrigger>
+            <AccordionTrigger className="text-left text-lg">Is Splitvero free to use?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
-              Yes, Pocket is 100% free. No hidden fees or premium tiers.
+              Yes, Splitvero is 100% free. No hidden fees or premium tiers.
             </AccordionContent>
           </AccordionItem>
           <AccordionItem value="item-2">
@@ -286,7 +286,7 @@ export default function Home() {
           <AccordionItem value="item-5">
             <AccordionTrigger className="text-left text-lg">Who is the admin of the group?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
-              Pocket operates on a "high trust" model. There are no strict admins—anyone in the group can add members, record expenses, or remove members (as long as all debts are settled!).
+              Splitvero operates on a "high trust" model. There are no strict admins—anyone in the group can add members, record expenses, or remove members (as long as all debts are settled!).
             </AccordionContent>
           </AccordionItem>
         </Accordion>
@@ -299,7 +299,7 @@ export default function Home() {
             <div className="bg-primary/10 p-2 rounded-xl">
               <Wallet className="text-primary w-5 h-5" />
             </div>
-            Pocket
+            Splitvero
           </div>
           <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
             <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
@@ -307,7 +307,7 @@ export default function Home() {
             <a href="mailto:hello@example.com" className="hover:text-foreground transition-colors">Contact</a>
           </div>
           <div className="text-sm text-muted-foreground">
-            © 2026 Pocket. All rights reserved.
+            © 2026 Splitvero. All rights reserved.
           </div>
         </div>
       </footer>
@@ -317,7 +317,7 @@ export default function Home() {
         onClose={() => setIsWelcomeModalOpen(false)}
         onSuccess={() => {
           setIsWelcomeModalOpen(false);
-          setUserName(localStorage.getItem("pocket_user_name"));
+          setUserName(localStorage.getItem("splitvero_user_name"));
           if (pendingAction === "create") {
             createGroup();
           } else {

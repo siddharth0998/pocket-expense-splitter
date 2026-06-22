@@ -14,29 +14,29 @@ export const viewport: Viewport = {
 
 export const metadata: Metadata = {
   title: {
-    default: "Pocket | Expense Splitter",
-    template: "%s | Pocket",
+    default: "Splitvero | Expense Splitter",
+    template: "%s | Splitvero",
   },
   description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
   keywords: ["expense splitter", "split bills", "roommate expenses", "shared expenses", "finance app"],
-  authors: [{ name: "Pocket Team" }],
-  creator: "Pocket",
+  authors: [{ name: "Splitvero Team" }],
+  creator: "Splitvero",
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://pocket.example.com",
-    title: "Pocket | Expense Splitter",
+    url: "https://splitvero.example.com",
+    title: "Splitvero | Expense Splitter",
     description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
-    siteName: "Pocket",
+    siteName: "Splitvero",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Pocket | Expense Splitter",
+    title: "Splitvero | Expense Splitter",
     description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
   },
   appleWebApp: {
     capable: true,
-    title: "Pocket",
+    title: "Splitvero",
     statusBarStyle: "default",
   },
   formatDetection: {

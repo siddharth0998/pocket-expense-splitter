@@ -10,7 +10,7 @@ export default function PrivacyPolicy() {
         <div className="space-y-6 text-lg">
           <section>
             <h2 className="text-2xl font-bold mb-3">1. Information We Collect</h2>
-            <p>Pocket ("we", "us", or "our") collects information you provide directly to us, such as when you create a group, add members, and record expenses. This includes names, expense descriptions, and amounts.</p>
+            <p>Splitvero ("we", "us", or "our") collects information you provide directly to us, such as when you create a group, add members, and record expenses. This includes names, expense descriptions, and amounts.</p>
           </section>
 
           <section>

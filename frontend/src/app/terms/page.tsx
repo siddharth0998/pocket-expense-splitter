@@ -10,12 +10,12 @@ export default function TermsOfService() {
         <div className="space-y-6 text-lg">
           <section>
             <h2 className="text-2xl font-bold mb-3">1. Acceptance of Terms</h2>
-            <p>By accessing or using Pocket, you agree to be bound by these Terms of Service. If you disagree with any part of the terms, then you may not access the service.</p>
+            <p>By accessing or using Splitvero, you agree to be bound by these Terms of Service. If you disagree with any part of the terms, then you may not access the service.</p>
           </section>
 
           <section>
             <h2 className="text-2xl font-bold mb-3">2. Use of the Service</h2>
-            <p>Pocket provides a tool for calculating shared expenses. You agree to use the service only for lawful purposes and in accordance with these Terms.</p>
+            <p>Splitvero provides a tool for calculating shared expenses. You agree to use the service only for lawful purposes and in accordance with these Terms.</p>
           </section>
 
           <section>
@@ -25,7 +25,7 @@ export default function TermsOfService() {
 
           <section>
             <h2 className="text-2xl font-bold mb-3">4. Limitation of Liability</h2>
-            <p>In no event shall Pocket be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or relating to your use of the service.</p>
+            <p>In no event shall Splitvero be liable for any indirect, incidental, special, consequential, or punitive damages arising out of or relating to your use of the service.</p>
           </section>
 
           <section>
