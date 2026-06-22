@@ -73,6 +73,16 @@ async function uploadAPI(endpoint: string, formData: FormData) {
 
 // --- API Methods ---
 export const api = {
+  // Authentication
+  requestOtp: (email: string) => 
+    fetchAPI("/users/request-otp", { method: "POST", body: JSON.stringify({ email }) }),
+    
+  verifyOtp: (email: string, code: string, name: string) => 
+    fetchAPI("/users/verify-otp", { method: "POST", body: JSON.stringify({ email, code, name }) }),
+    
+  googleLogin: (credential: string) => 
+    fetchAPI("/users/google-login", { method: "POST", body: JSON.stringify({ credential }) }),
+
   // Users & Groups
   createUser: (name: string, email: string) => 
     fetchAPI("/users/", { method: "POST", body: JSON.stringify({ name, email }) }),

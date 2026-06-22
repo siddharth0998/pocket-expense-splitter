@@ -4,13 +4,18 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Any
 import os
 import csv
 import io
 import calendar
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime, timedelta
+import random
+import smtplib
+from email.message import EmailMessage
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 # Import the files we just wrote
 from . import models, algorithm
@@ -133,8 +138,10 @@ def first_monthly_run(start: date, day_of_month: int) -> date:
         return next_monthly_run(run_on, day_of_month)
     return run_on
 
-def validate_ledger_payload(payload: ExpenseCreate, db: Session):
-    if payload.amount <= 0:
+def validate_ledger_payload(payload: Any, db: Session, x_user_id: str):
+    if not x_user_id:
+        raise HTTPException(status_code=403, detail="Unauthenticated request")
+    if hasattr(payload, 'amount') and payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
     group = db.query(models.Group).filter(models.Group.id == payload.group_id).first()
@@ -142,6 +149,9 @@ def validate_ledger_payload(payload: ExpenseCreate, db: Session):
         raise HTTPException(status_code=404, detail="Group not found")
 
     member_ids = {m.id for m in group.members}
+    if x_user_id not in member_ids:
+        raise HTTPException(status_code=403, detail="You must be a member of this group to modify the ledger")
+        
     if payload.payer_id not in member_ids:
         raise HTTPException(status_code=400, detail="Payer is not in the group")
 
@@ -229,6 +239,156 @@ def process_due_recurring_expenses(group_id: str, db: Session) -> int:
     return generated_count
 
 # API Endpoints: Users & Groups
+class GoogleLoginPayload(BaseModel):
+    credential: str
+
+class OTPRequest(BaseModel):
+    email: str
+
+class OTPVerify(BaseModel):
+    email: str
+    code: str
+    name: str
+
+def send_email(to_email: str, subject: str, html_content: str):
+    smtp_user = os.getenv("SMTP_USER")
+    smtp_pass = os.getenv("SMTP_PASSWORD")
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", 587))
+
+    if not smtp_user or not smtp_pass:
+        print(f"--- EMAIL MOCK ---")
+        print(f"To: {to_email}")
+        print(f"Subject: {subject}")
+        print(f"Content: {html_content}")
+        print(f"------------------")
+        return
+
+    msg = EmailMessage()
+    msg['Subject'] = subject
+    msg['From'] = f"Pocket App <{smtp_user}>"
+    msg['To'] = to_email
+    msg.set_content("Please enable HTML to view this email.")
+    msg.add_alternative(html_content, subtype='html')
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.send_message(msg)
+    except Exception as e:
+        print(f"Failed to send email: {e}")
+
+@app.post("/users/request-otp")
+def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
+    email = payload.email.lower().strip()
+    if not email:
+        raise HTTPException(400, "Email required")
+    
+    code = f"{random.randint(100000, 999999)}"
+    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    
+    otp_record = db.query(models.UserOTP).filter(models.UserOTP.email == email).first()
+    if otp_record:
+        otp_record.otp_code = code
+        otp_record.expires_at = expires_at
+    else:
+        otp_record = models.UserOTP(email=email, otp_code=code, expires_at=expires_at)
+        db.add(otp_record)
+        
+    db.commit()
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <title>Pocket Verification</title>
+    </head>
+    <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 0;">
+        <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); overflow: hidden;">
+            <tr>
+                <td style="padding: 40px 40px 20px 40px; text-align: center; background-color: #4f46e5;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.5px;">Pocket</h1>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 40px;">
+                    <h2 style="color: #18181b; font-size: 20px; margin-top: 0; margin-bottom: 20px;">Sign in to your account</h2>
+                    <p style="color: #52525b; font-size: 16px; line-height: 1.5; margin-bottom: 30px;">
+                        Use the secure verification code below to access your Pocket Expense Splitter account. This code is unique to you.
+                    </p>
+                    
+                    <div style="background-color: #f4f4f5; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 30px;">
+                        <span style="font-family: monospace; font-size: 36px; font-weight: 700; color: #4f46e5; letter-spacing: 8px;">{code}</span>
+                    </div>
+                    
+                    <p style="color: #71717a; font-size: 14px; margin-bottom: 0;">
+                        This code will expire securely in 10 minutes. If you did not request this email, you can safely ignore it.
+                    </p>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 20px 40px; background-color: #fafafa; border-top: 1px solid #e4e4e7; text-align: center;">
+                    <p style="color: #a1a1aa; font-size: 12px; margin: 0;">
+                        &copy; 2026 Pocket Expense Splitter. All rights reserved.
+                    </p>
+                </td>
+            </tr>
+        </table>
+    </body>
+    </html>
+    """
+    send_email(email, "Pocket Verification Code", html)
+    return {"message": "OTP sent"}
+
+@app.post("/users/verify-otp")
+def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
+    email = payload.email.lower().strip()
+    otp_record = db.query(models.UserOTP).filter(models.UserOTP.email == email).first()
+    
+    if not otp_record or otp_record.otp_code != payload.code.strip():
+        raise HTTPException(401, "Invalid or expired verification code")
+        
+    if otp_record.expires_at < datetime.utcnow():
+        raise HTTPException(401, "Verification code has expired")
+        
+    # Valid! Find or create user.
+    user = db.query(models.User).filter(models.User.email == email).first()
+    if not user:
+        user = models.User(name=payload.name, email=email)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+    # Clear OTP
+    db.delete(otp_record)
+    db.commit()
+    
+    return {"id": user.id, "name": user.name}
+
+@app.post("/users/google-login")
+def google_login(payload: GoogleLoginPayload, db: Session = Depends(get_db)):
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(500, "Server not configured for Google Sign-In")
+        
+    try:
+        idinfo = id_token.verify_oauth2_token(payload.credential, google_requests.Request(), client_id)
+        email = idinfo['email'].lower()
+        name = idinfo.get('name', email.split('@')[0])
+        
+        user = db.query(models.User).filter(models.User.email == email).first()
+        if not user:
+            user = models.User(name=name, email=email)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            
+        return {"id": user.id, "name": user.name}
+    except ValueError:
+        raise HTTPException(401, "Invalid Google token")
+
 @app.post("/users/")
 def create_user(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.email == user.email).first()
@@ -258,10 +418,20 @@ def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db
     return {"id": db_group.id, "name": db_group.name}
 
 @app.get("/groups/")
-def get_all_groups(db: Session = Depends(get_db)):
-    """Fetches all existing groups."""
+def get_all_groups(x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+    """Fetches all existing groups that the user is a part of."""
+    if not x_user_id:
+        return []
+        
     groups = db.query(models.Group).all()
-    return [{"id": g.id, "name": g.name, "currency": g.currency} for g in groups]
+    user_groups = []
+    
+    for g in groups:
+        is_member = any(m.id == x_user_id for m in g.members)
+        if is_member:
+            user_groups.append({"id": g.id, "name": g.name, "currency": g.currency})
+            
+    return user_groups
 
 def require_group_access(group_id: str, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
@@ -273,9 +443,6 @@ def require_group_access(group_id: str, x_user_id: Optional[str] = Header(None),
         
     if not x_user_id:
         raise HTTPException(status_code=403, detail="Access Denied: Please identify yourself to view this group.")
-        
-    if x_user_id == group.creator_id:
-        return group
         
     member_ids = [m.id for m in group.members]
     if x_user_id in member_ids:
@@ -294,8 +461,11 @@ def get_group_details(group_id: str, db: Session = Depends(get_db), _ = Depends(
     return {
         "id": group.id,
         "name": group.name,
+        "creator_id": group.creator_id,
         "members": [{"id": m.id, "name": m.name} for m in group.members]
     }
+
+INVITE_RATE_LIMIT = {}
 
 @app.post("/groups/{group_id}/members")
 def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depends(get_db), _ = Depends(require_group_access)):
@@ -305,12 +475,28 @@ def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depe
     if not group or not user:
         raise HTTPException(status_code=404, detail="Group or User not found")
         
-    group.members.append(user)
-    db.commit()
+    if user not in group.members:
+        group.members.append(user)
+        db.commit()
+
+        # Rate Limited Email Invitation (1 per hour per email)
+        now = datetime.utcnow()
+        last_sent = INVITE_RATE_LIMIT.get(user.email)
+        if not last_sent or (now - last_sent) > timedelta(hours=1):
+            INVITE_RATE_LIMIT[user.email] = now
+            html_content = f"""
+            <div style="font-family: sans-serif; padding: 20px;">
+                <h2>You've been added to a group!</h2>
+                <p>You were just added to the group <b>{group.name}</b> on Pocket.</p>
+                <p>Log in with this email address to view the ledger and settle up your expenses.</p>
+            </div>
+            """
+            send_email(user.email, f"You were added to {group.name}", html_content)
+
     return {"message": f"Added {user.name} to {group.name}"}
 
 @app.delete("/groups/{group_id}/members/{user_id}")
-def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
+def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     user = db.query(models.User).filter(models.User.id == user_id).first()
     
@@ -346,11 +532,11 @@ def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(ge
     return {"message": f"Removed {user.name} from {group.name}"}
 
 @app.delete("/groups/{group_id}")
-def delete_group(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
+def delete_group(group_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-        
+
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
     settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
     
@@ -376,8 +562,8 @@ def delete_group(group_id: str, db: Session = Depends(get_db), _ = Depends(requi
 
 # API Endpoints: The Ledger (Expenses & Settlements)
 @app.post("/expenses/")
-def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
-    validate_ledger_payload(expense, db)
+def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
+    validate_ledger_payload(expense, db, x_user_id)
     db_expense = create_expense_rows(
         db,
         group_id=expense.group_id,
@@ -390,13 +576,18 @@ def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db)):
     return {"message": "Expense recorded", "expense_id": db_expense.id}
 
 @app.post("/expenses/{expense_id}/receipt")
-def upload_receipt(expense_id: str, receipt: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_receipt(expense_id: str, receipt: UploadFile = File(...), db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
     expense = db.query(models.Expense).filter(
         models.Expense.id == expense_id,
         models.Expense.is_deleted == False,
     ).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
+        
+    group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
+    if not group or x_user_id not in [m.id for m in group.members]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+        
     if not receipt.content_type or not receipt.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Receipt must be an image")
 
@@ -412,8 +603,8 @@ def upload_receipt(expense_id: str, receipt: UploadFile = File(...), db: Session
     return {"message": "Receipt uploaded", "receipt_url": expense.receipt_url}
 
 @app.post("/recurring-expenses/")
-def create_recurring_expense(template: RecurringExpenseCreate, db: Session = Depends(get_db)):
-    validate_ledger_payload(template, db)
+def create_recurring_expense(template: RecurringExpenseCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
+    validate_ledger_payload(template, db, x_user_id)
 
     start = template.start_date or date.today()
     day_of_month = template.day_of_month or start.day
@@ -475,26 +666,37 @@ def get_group_recurring_expenses(group_id: str, db: Session = Depends(get_db), _
     }
 
 @app.delete("/expenses/{expense_id}")
-def delete_expense(expense_id: str, db: Session = Depends(get_db)):
+def delete_expense(expense_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
     expense = db.query(models.Expense).filter(models.Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
+        
+    group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
+    if not group or x_user_id not in [m.id for m in group.members]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
     
     expense.is_deleted = True
     db.commit()
     return {"message": "Expense deleted"}
 
 @app.post("/settlements/")
-def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db)):
+def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
     """Records a payment between two users to clear debt."""
+    if not x_user_id:
+        raise HTTPException(status_code=403, detail="Unauthenticated")
+        
     if settlement.payer_id == settlement.receiver_id:
         raise HTTPException(status_code=400, detail="Payer and receiver cannot be the same")
     if settlement.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+
     group = db.query(models.Group).filter(models.Group.id == settlement.group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
+        
     member_ids = {m.id for m in group.members}
+    if x_user_id not in member_ids:
+        raise HTTPException(status_code=403, detail="Unauthorized to settle in this group")
     if settlement.payer_id not in member_ids or settlement.receiver_id not in member_ids:
         raise HTTPException(status_code=400, detail="Both settlement users must be in the group")
 
@@ -533,7 +735,7 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
             "receipt_filename": e.receipt_filename,
             "recurring_template_id": e.recurring_template_id,
             "generated_for_month": e.generated_for_month,
-            "created_at": e.created_at
+            "created_at": e.created_at.isoformat() + "Z"
         })
     for s in settlements:
         feed.append({
@@ -549,7 +751,7 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
             "receipt_filename": None,
             "recurring_template_id": None,
             "generated_for_month": None,
-            "created_at": s.created_at
+            "created_at": s.created_at.isoformat() + "Z"
         })
 
     # Sort by created_at descending (newest first)

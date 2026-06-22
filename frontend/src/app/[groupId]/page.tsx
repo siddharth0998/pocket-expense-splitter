@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, CheckCircle2 } from "lucide-react";
+import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, CheckCircle2, LogOut } from "lucide-react";
 
 type Member = {
   id: string;
@@ -25,6 +25,7 @@ type Member = {
 type Group = {
   id: string;
   name: string;
+  creator_id: string;
   members: Member[];
 };
 
@@ -40,6 +41,7 @@ type FeedItem = {
   amount: number;
   receipt_url?: string | null;
   generated_for_month?: string | null;
+  created_at?: string;
 };
 
 type SuggestedSettlement = {
@@ -78,6 +80,7 @@ export default function GroupDashboard() {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Modal States
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
@@ -88,6 +91,7 @@ export default function GroupDashboard() {
 
   // Form States
   const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberEmail, setNewMemberEmail] = useState("");
   const [expenseDesc, setExpenseDesc] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [payerId, setPayerId] = useState("");
@@ -132,6 +136,7 @@ export default function GroupDashboard() {
   }, [groupId]);
 
   useEffect(() => {
+    setCurrentUserId(localStorage.getItem("pocket_user_id"));
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData();
   }, [loadData]);
@@ -139,11 +144,12 @@ export default function GroupDashboard() {
   // --- Actions ---
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMemberName.trim()) return;
+    if (!newMemberName.trim() || !newMemberEmail.trim()) return;
     try {
-      const res = await api.createUser(newMemberName, `${newMemberName.replace(/\s+/g, '').toLowerCase()}@example.com`);
+      const res = await api.createUser(newMemberName, newMemberEmail.trim().toLowerCase());
       await api.addMemberToGroup(groupId as string, res.id);
       setNewMemberName("");
+      setNewMemberEmail("");
       setIsMemberModalOpen(false);
       void loadData();
     } catch (err: any) {
@@ -152,7 +158,12 @@ export default function GroupDashboard() {
   };
 
   const handleRemoveMember = async (userId: string, userName: string) => {
-    if (!window.confirm(`Are you sure you want to remove ${userName} from the group?`)) return;
+    const isSelf = currentUserId === userId;
+    const msg = isSelf 
+      ? `Are you sure you want to leave the group?` 
+      : `Are you sure you want to remove ${userName} from the group?`;
+      
+    if (!window.confirm(msg)) return;
     try {
       await api.removeMemberFromGroup(groupId as string, userId);
       void loadData();
@@ -359,9 +370,15 @@ export default function GroupDashboard() {
         <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl">
           <DialogHeader><DialogTitle className="text-xl">Add a new member</DialogTitle></DialogHeader>
           <form onSubmit={handleAddMember} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label>Name</Label>
-              <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Name</Label>
+                <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+              </div>
+              <div className="space-y-2">
+                <Label>Email Address</Label>
+                <Input value={newMemberEmail} onChange={(e) => setNewMemberEmail(e.target.value)} type="email" placeholder="e.g., alice@example.com" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+              </div>
             </div>
             <Button type="submit" className="w-full rounded-full h-12">Add to Group</Button>
           </form>
@@ -383,8 +400,14 @@ export default function GroupDashboard() {
                     </div>
                     <span className="font-semibold text-foreground truncate max-w-[150px]">{member.name}</span>
                   </div>
-                  <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-full w-9 h-9 p-0 shadow-sm" onClick={() => handleRemoveMember(member.id, member.name)} title="Remove member">
-                    <Trash2 className="w-4 h-4" />
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="text-red-500 hover:text-red-600 hover:bg-red-50 rounded-full w-9 h-9 p-0 shadow-sm" 
+                    onClick={() => handleRemoveMember(member.id, member.name)} 
+                    title={currentUserId === member.id ? "Leave group" : "Remove member"}
+                  >
+                    {currentUserId === member.id ? <LogOut className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
                   </Button>
                 </div>
               ))
@@ -640,8 +663,16 @@ export default function GroupDashboard() {
                             </a>
                           )}
                         </div>
-                        <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider">
-                          {isPayment ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}
+                        <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider flex items-center gap-2">
+                          <span>{isPayment ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}</span>
+                          {item.created_at && (
+                            <>
+                              <span>•</span>
+                              <span>{new Date(item.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                              <span>•</span>
+                              <span>{new Date(item.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>

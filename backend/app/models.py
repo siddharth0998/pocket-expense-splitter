@@ -28,6 +28,13 @@ class User(Base):
     settlements_paid = relationship("Settlement", foreign_keys="[Settlement.payer_id]")
     settlements_received = relationship("Settlement", foreign_keys="[Settlement.receiver_id]")
 
+class UserOTP(Base):
+    __tablename__ = "user_otps"
+
+    email = Column(String, primary_key=True)
+    otp_code = Column(String, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+
 class Group(Base):
     __tablename__ = "groups"
 

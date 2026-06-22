@@ -30,18 +30,29 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
+  const [userName, setUserName] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<"create" | "login">("create");
+
+  const fetchGroups = async () => {
+    try {
+      const data = await api.getAllGroups();
+      setGroups(data);
+    } catch (error) {
+      console.error("Failed to load existing groups:", error);
+    }
+  };
 
   useEffect(() => {
-    const fetchGroups = async () => {
-      try {
-        const data = await api.getAllGroups();
-        setGroups(data);
-      } catch (error) {
-        console.error("Failed to load existing groups:", error);
-      }
-    };
+    setUserName(localStorage.getItem("pocket_user_name"));
     fetchGroups();
   }, []);
+
+  const handleLogout = () => {
+    localStorage.removeItem("pocket_user_id");
+    localStorage.removeItem("pocket_user_name");
+    setUserName(null);
+    setGroups([]);
+  };
 
   const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +60,7 @@ export default function Home() {
 
     // Check identity before creating group
     if (!localStorage.getItem("pocket_user_id")) {
+      setPendingAction("create");
       setIsWelcomeModalOpen(true);
       return;
     }
@@ -83,7 +95,22 @@ export default function Home() {
           </div>
           Pocket
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-4">
+          {userName ? (
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <span className="hidden sm:inline-block truncate max-w-[150px]">{userName}</span>
+              <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground text-xs font-bold px-2 py-1 bg-secondary rounded-md transition-colors">Sign Out</button>
+            </div>
+          ) : (
+            <button 
+              onClick={() => { setPendingAction("login"); setIsWelcomeModalOpen(true); }} 
+              className="text-sm font-bold px-4 py-2 bg-primary text-primary-foreground rounded-[1rem] hover:bg-primary/90 transition-colors shadow-sm"
+            >
+              Log In
+            </button>
+          )}
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* HERO SECTION */}
@@ -247,13 +274,19 @@ export default function Home() {
           <AccordionItem value="item-3">
             <AccordionTrigger className="text-left text-lg">Do my friends need to create accounts?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
-              Nope! You can add them as members and record expenses for them. They can view the group link without signing up.
+              When you add a friend using their email, they can instantly log in using a secure one-time passcode or Google Sign-In to see the group and add their own expenses!
             </AccordionContent>
           </AccordionItem>
           <AccordionItem value="item-4">
             <AccordionTrigger className="text-left text-lg">Can I split expenses unequally?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
               Absolutely. When adding an expense, you can switch from "Equal" to "Exact" splits and manually assign who owes what.
+            </AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-5">
+            <AccordionTrigger className="text-left text-lg">Who is the admin of the group?</AccordionTrigger>
+            <AccordionContent className="text-muted-foreground text-base">
+              Pocket operates on a "high trust" model. There are no strict admins—anyone in the group can add members, record expenses, or remove members (as long as all debts are settled!).
             </AccordionContent>
           </AccordionItem>
         </Accordion>
@@ -279,13 +312,18 @@ export default function Home() {
         </div>
       </footer>
 
-      <WelcomeModal 
-        isOpen={isWelcomeModalOpen} 
-        onClose={() => setIsWelcomeModalOpen(false)} 
+      <WelcomeModal
+        isOpen={isWelcomeModalOpen}
+        onClose={() => setIsWelcomeModalOpen(false)}
         onSuccess={() => {
           setIsWelcomeModalOpen(false);
-          createGroup();
-        }} 
+          setUserName(localStorage.getItem("pocket_user_name"));
+          if (pendingAction === "create") {
+            createGroup();
+          } else {
+            fetchGroups();
+          }
+        }}
       />
     </div>
   );
