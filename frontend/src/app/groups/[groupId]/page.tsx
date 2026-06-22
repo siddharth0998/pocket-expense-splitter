@@ -386,9 +386,11 @@ export default function GroupDashboard() {
       </Dialog>
 
       <Dialog open={isViewMembersModalOpen} onOpenChange={setIsViewMembersModalOpen}>
-        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[85vh] flex flex-col">
-          <DialogHeader><DialogTitle className="text-xl">Group Members</DialogTitle></DialogHeader>
-          <div className="overflow-y-auto pr-2 -mr-2 pt-4 space-y-3">
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col overflow-hidden p-0">
+          <div className="pt-6 px-6">
+            <DialogHeader><DialogTitle className="text-xl">Group Members</DialogTitle></DialogHeader>
+          </div>
+          <div className="overflow-y-auto px-6 pb-6 pt-4 space-y-3 flex-1 min-h-0">
             {group.members.length === 0 ? (
               <p className="text-muted-foreground text-center py-4">No members yet.</p>
             ) : (
@@ -417,9 +419,11 @@ export default function GroupDashboard() {
       </Dialog>
 
       <Dialog open={isExpenseModalOpen} onOpenChange={setIsExpenseModalOpen}>
-        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90vh] flex flex-col">
-          <DialogHeader><DialogTitle className="text-xl">Record an expense</DialogTitle></DialogHeader>
-          <div className="overflow-y-auto pr-2 -mr-2 flex-1">
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col overflow-hidden p-0">
+          <div className="pt-6 px-6">
+            <DialogHeader><DialogTitle className="text-xl">Record an expense</DialogTitle></DialogHeader>
+          </div>
+          <div className="overflow-y-auto px-6 pb-6 flex-1 min-h-0">
             <form onSubmit={handleAddExpense} className="space-y-4 pt-4 pb-4">
             <div className="space-y-2">
               <Label>Description</Label>
