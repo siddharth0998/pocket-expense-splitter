@@ -649,8 +649,8 @@ export default function GroupDashboard() {
                 const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
                 const isPayment = item.type === "settlement";
                 return (
-                  <div key={index} className="flex items-center justify-between p-5 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
-                    <div className="flex items-center gap-4">
+                  <div key={index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-center gap-4 w-full sm:w-auto">
                       <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 ${isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
                         {isPayment ? <ArrowRightLeft className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
                       </div>
@@ -676,7 +676,7 @@ export default function GroupDashboard() {
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-border/50">
                       <div className={`font-extrabold text-lg tracking-tight ${isPayment ? 'text-emerald-600' : 'text-foreground'}`}>
                         ${item.amount.toFixed(2)}
                       </div>
@@ -702,8 +702,8 @@ export default function GroupDashboard() {
             </h2>
             <div className="space-y-4">
               {recurringExpenses.map((expense) => (
-                <div key={expense.id} className="flex items-center justify-between p-5 bg-card border border-border rounded-[2rem] shadow-sm">
-                  <div className="flex items-center gap-4">
+                <div key={expense.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm">
+                  <div className="flex items-center gap-4 w-full sm:w-auto">
                     <div className="w-12 h-12 rounded-[1.25rem] bg-orange-50 flex items-center justify-center shrink-0">
                       <CalendarClock className="w-5 h-5 text-orange-500" />
                     </div>
@@ -712,7 +712,7 @@ export default function GroupDashboard() {
                       <div className="text-xs font-medium text-muted-foreground mt-1">Paid by {expense.payer_name} on day {expense.day_of_month}</div>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="flex flex-row sm:flex-col justify-between sm:justify-end items-center sm:items-end w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-0 border-border/50">
                     <div className="font-extrabold text-lg text-foreground tracking-tight">${expense.amount.toFixed(2)}</div>
                     <div className="text-xs font-semibold text-muted-foreground mt-1">Next: {expense.next_run_on}</div>
                   </div>
