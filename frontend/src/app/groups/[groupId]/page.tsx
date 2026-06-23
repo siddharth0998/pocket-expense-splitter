@@ -42,6 +42,10 @@ type FeedItem = {
   receipt_url?: string | null;
   generated_for_month?: string | null;
   created_at?: string;
+  payer_id?: string;
+  payer_name?: string;
+  receiver_id?: string;
+  receiver_name?: string;
 };
 
 type SuggestedSettlement = {
@@ -605,19 +609,46 @@ export default function GroupDashboard() {
               <p className="text-sm mt-1">No debts among members.</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {settlements.map((s, index) => (
-                <div key={index} className="overflow-hidden border border-border shadow-md shadow-zinc-200/50 rounded-[2.5rem] bg-card hover:shadow-lg transition-shadow">
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
+              {settlements.map((s, index) => {
+                let iconColorClass = 'bg-red-50 text-red-600';
+                let amountColorClass = 'text-red-600';
+                let iconElement = <ArrowRightLeft className="w-6 h-6 text-red-500" />;
+
+                let settlementText;
+
+                if (s.payer_id === currentUserId) {
+                  // User owes money (outflow)
+                  iconColorClass = 'bg-red-50 text-red-600';
+                  amountColorClass = 'text-red-600';
+                  iconElement = <ArrowRightLeft className="w-6 h-6 text-red-500" />;
+                  settlementText = <><span className="font-bold text-foreground">You</span> owe <span className="font-bold text-foreground">{s.receiver_name}</span></>;
+                } else if (s.receiver_id === currentUserId) {
+                  // User is owed money (inflow)
+                  iconColorClass = 'bg-emerald-50 text-emerald-600';
+                  amountColorClass = 'text-emerald-600';
+                  iconElement = <ArrowRightLeft className="w-6 h-6 text-emerald-500" />;
+                  settlementText = <><span className="font-bold text-foreground">{s.payer_name}</span> owes <span className="font-bold text-foreground">you</span></>;
+                } else {
+                  // Third party
+                  iconColorClass = 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400';
+                  amountColorClass = 'text-zinc-600 dark:text-zinc-400';
+                  iconElement = <ArrowRightLeft className="w-6 h-6 text-zinc-500 dark:text-zinc-400" />;
+                  settlementText = <><span className="font-bold text-foreground">{s.payer_name}</span> owes <span className="font-bold text-foreground">{s.receiver_name}</span></>;
+                }
+
+                return (
+                <div key={index} className="overflow-hidden border border-border shadow-md rounded-[2.5rem] bg-card hover:shadow-lg transition-shadow">
                   <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
                     <div className="flex items-center gap-5">
-                      <div className="w-14 h-14 rounded-[1.5rem] bg-red-50 flex items-center justify-center shrink-0">
-                        <ArrowRightLeft className="w-6 h-6 text-red-500" />
+                      <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center shrink-0 ${iconColorClass}`}>
+                        {iconElement}
                       </div>
                       <div>
                         <div className="text-base text-muted-foreground">
-                          <span className="font-bold text-foreground">{s.payer_name}</span> owes <span className="font-bold text-foreground">{s.receiver_name}</span>
+                          {settlementText}
                         </div>
-                        <div className="font-extrabold text-3xl text-red-600 tracking-tight mt-1">
+                        <div className={`font-extrabold text-3xl tracking-tight mt-1 ${amountColorClass}`}>
                           ${s.amount.toFixed(2)}
                         </div>
                       </div>
@@ -631,7 +662,8 @@ export default function GroupDashboard() {
                     </Button>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>
@@ -643,7 +675,7 @@ export default function GroupDashboard() {
             Recent Activity
           </h2>
 
-          <div className="space-y-4">
+          <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
             {feed.length === 0 ? (
               <div className="p-10 text-center text-muted-foreground bg-card/60 rounded-[2.5rem] border border-dashed border-border">
                 <Receipt className="w-12 h-12 text-zinc-300 mx-auto mb-4" />
@@ -654,15 +686,36 @@ export default function GroupDashboard() {
               feed.map((item, index) => {
                 const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
                 const isPayment = item.type === "settlement";
+                
+                let iconColorClass = isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary';
+                let amountColorClass = isPayment ? 'text-emerald-600' : 'text-foreground';
+                let descriptionText = item.description;
+
+                if (isPayment && item.payer_id && item.receiver_id) {
+                  if (item.payer_id === currentUserId) {
+                    descriptionText = `Payment to ${item.receiver_name}`;
+                    iconColorClass = 'bg-red-50 text-red-600';
+                    amountColorClass = 'text-red-600';
+                  } else if (item.receiver_id === currentUserId) {
+                    descriptionText = `Payment from ${item.payer_name}`;
+                    iconColorClass = 'bg-emerald-50 text-emerald-600';
+                    amountColorClass = 'text-emerald-600';
+                  } else {
+                    descriptionText = `Payment from ${item.payer_name} to ${item.receiver_name}`;
+                    iconColorClass = 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400';
+                    amountColorClass = 'text-zinc-600 dark:text-zinc-400';
+                  }
+                }
+
                 return (
                   <div key={index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
-                      <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 ${isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary'}`}>
+                      <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 ${iconColorClass}`}>
                         {isPayment ? <ArrowRightLeft className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
                       </div>
                       <div>
                         <div className="font-bold text-foreground flex items-center gap-2 text-base">
-                          {item.description}
+                          {descriptionText}
                           {item.receipt_url && (
                             <a href={receiptHref} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary transition-colors" title="Open receipt">
                               <Paperclip className="w-4 h-4" />
@@ -670,7 +723,7 @@ export default function GroupDashboard() {
                           )}
                         </div>
                         <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider flex items-center gap-2">
-                          <span>{isPayment ? "Payment" : item.generated_for_month ? "Monthly" : "Expense"}</span>
+                          <span>{isPayment ? "Payment" : item.generated_for_month ? "Monthly" : `Paid by ${item.payer_name || 'Unknown'}`}</span>
                           {item.created_at && (
                             <>
                               <span>•</span>
@@ -683,7 +736,7 @@ export default function GroupDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-border/50">
-                      <div className={`font-extrabold text-lg tracking-tight ${isPayment ? 'text-emerald-600' : 'text-foreground'}`}>
+                      <div className={`font-extrabold text-lg tracking-tight ${amountColorClass}`}>
                         ${item.amount.toFixed(2)}
                       </div>
                       {item.type === "expense" && (
@@ -706,7 +759,7 @@ export default function GroupDashboard() {
               <div className="bg-orange-100 p-2 rounded-xl text-orange-600"><CalendarClock className="w-5 h-5" /></div>
               Monthly Expenses
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
               {recurringExpenses.map((expense) => (
                 <div key={expense.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm">
                   <div className="flex items-center gap-4 w-full sm:w-auto">

@@ -152,7 +152,7 @@ export default function Home() {
             {groups.length > 0 && (
               <div className="mt-8 pt-6 border-t border-border">
                 <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-widest mb-4 text-center">Your Groups</h3>
-                <div className="space-y-3">
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                   {groups.map((g) => (
                     <Button
                       key={g.id}
