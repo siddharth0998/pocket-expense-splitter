@@ -1,4 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Terms of Service",
+  description:
+    "Read the terms that apply when using Splitvero to calculate and manage shared expenses.",
+  alternates: {
+    canonical: "/terms",
+  },
+  openGraph: {
+    title: "Terms of Service | Splitvero",
+    description:
+      "Read the terms that apply when using Splitvero to calculate and manage shared expenses.",
+    url: "/terms",
+  },
+};
 
 export default function TermsOfService() {
   return (

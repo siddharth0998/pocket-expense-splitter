@@ -2,6 +2,11 @@ import type { Metadata, Viewport } from "next";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
+const siteUrl = "https://splitvero.com";
+const siteTitle = "Free Expense Splitter for Friends and Roommates | Splitvero";
+const siteDescription =
+  "Splitvero helps friends, roommates, and travel groups split bills, track shared expenses, upload receipts, and settle up with fewer payments.";
+
 export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "white" },
@@ -13,26 +18,61 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
+  applicationName: "Splitvero",
   title: {
-    default: "Splitvero | Expense Splitter",
+    default: siteTitle,
     template: "%s | Splitvero",
   },
-  description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
-  keywords: ["expense splitter", "split bills", "roommate expenses", "shared expenses", "finance app"],
+  description: siteDescription,
+  keywords: [
+    "expense splitter",
+    "free expense splitter",
+    "split bills",
+    "bill splitter",
+    "roommate expenses",
+    "trip expense splitter",
+    "shared expenses",
+    "settle up app",
+  ],
   authors: [{ name: "Splitvero Team" }],
   creator: "Splitvero",
+  publisher: "Splitvero",
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://splitvero.example.com",
-    title: "Splitvero | Expense Splitter",
-    description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
+    url: "/",
+    title: siteTitle,
+    description: siteDescription,
     siteName: "Splitvero",
+    images: [
+      {
+        url: "/opengraph-image",
+        width: 1200,
+        height: 630,
+        alt: "Splitvero expense splitter preview",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Splitvero | Expense Splitter",
-    description: "A fast, beautiful, and focused expense splitter for roommates and friend groups.",
+    title: siteTitle,
+    description: siteDescription,
+    images: ["/opengraph-image"],
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
   appleWebApp: {
     capable: true,

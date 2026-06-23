@@ -4,11 +4,12 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { Wallet, ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download } from "lucide-react";
+import { ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WelcomeModal } from "@/components/welcome-modal";
 import {
@@ -22,6 +23,90 @@ type GroupSummary = {
   id: string;
   name: string;
   currency: string;
+};
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://splitvero.com/#organization",
+      name: "Splitvero",
+      url: "https://splitvero.com",
+      logo: "https://splitvero.com/logo.png",
+    },
+    {
+      "@type": "WebApplication",
+      "@id": "https://splitvero.com/#webapp",
+      name: "Splitvero",
+      url: "https://splitvero.com",
+      applicationCategory: "FinanceApplication",
+      operatingSystem: "Web",
+      description:
+        "A free expense splitter for friends, roommates, and travel groups to split bills, track shared expenses, upload receipts, and settle up.",
+      creator: {
+        "@id": "https://splitvero.com/#organization",
+      },
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+      },
+      featureList: [
+        "Equal and exact expense splits",
+        "Recurring monthly expenses",
+        "Receipt uploads",
+        "Minimized settle-up payments",
+        "CSV export",
+      ],
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://splitvero.com/#faq",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: "Is Splitvero free to use?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes, Splitvero is free to use with no hidden fees or premium tiers.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "How are settlements calculated?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Splitvero uses a min-cash-flow algorithm to reduce the total number of transactions between group members.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Do my friends need to create accounts?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Friends can log in using a secure one-time passcode or Google Sign-In to view the group and add expenses.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Can I split expenses unequally?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Yes. You can switch from equal splits to exact splits and manually assign who owes what.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Who is the admin of the group?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: "Splitvero uses a high trust model where anyone in the group can add members, record expenses, or remove members when debts are settled.",
+          },
+        },
+      ],
+    },
+  ],
 };
 
 export default function Home() {
@@ -85,12 +170,19 @@ export default function Home() {
   };
 
   return (
+    <>
+    <script
+      type="application/ld+json"
+      dangerouslySetInnerHTML={{
+        __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
+      }}
+    />
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden transition-colors duration-300">
 
       {/* HEADER */}
       <header className="w-full flex justify-between items-center p-4 md:px-8 absolute top-0 z-50">
         <div className="flex items-center gap-2 font-bold text-xl text-foreground">
-          <img src="/logo.png" alt="Splitvero Logo" className="w-8 h-8" />
+          <Image src="/logo.png" alt="" width={32} height={32} priority className="w-8 h-8" />
           Splitvero
         </div>
         <div className="flex items-center gap-4">
@@ -120,10 +212,10 @@ export default function Home() {
         <div className="text-center mb-10 z-10 animate-in fade-in slide-in-from-bottom-4 duration-1000 max-w-2xl">
 
           <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-foreground mb-6">
-            Never wonder who <br className="hidden md:block" /> owes whom again.
+            Free expense splitter for friends, roommates, and trips.
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto">
-            Struggling to keep track of shared expenses? Splitvero makes splitting costs simple, fair, and mathematically perfect.
+            Split shared bills, track receipts, handle recurring expenses, and settle up with fewer payments.
           </p>
         </div>
 
@@ -290,18 +382,28 @@ export default function Home() {
 
       {/* FOOTER */}
       <footer className="bg-card border-t border-border py-12 px-4 mt-auto">
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
-          <div className="flex items-center gap-2 font-bold text-xl text-foreground">
-            <img src="/logo.png" alt="Splitvero Logo" className="w-6 h-6 opacity-80 grayscale" />
-            Splitvero
+        <div className="max-w-5xl mx-auto flex flex-col gap-8">
+          <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground max-w-2xl mx-auto text-center">
+            <Link href="/free-expense-splitter" className="hover:text-foreground transition-colors">Free Expense Splitter</Link>
+            <Link href="/roommate-expense-splitter" className="hover:text-foreground transition-colors">Roommate Expense Splitter</Link>
+            <Link href="/trip-expense-splitter" className="hover:text-foreground transition-colors">Trip Expense Splitter</Link>
+            <Link href="/split-rent-calculator" className="hover:text-foreground transition-colors">Split Rent Calculator</Link>
+            <Link href="/unequal-expense-splitter" className="hover:text-foreground transition-colors">Unequal Expense Splitter</Link>
+            <Link href="/split-bills-with-friends" className="hover:text-foreground transition-colors">Split Bills with Friends</Link>
           </div>
-          <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
-            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
-            <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
-            <a href="mailto:hello@example.com" className="hover:text-foreground transition-colors">Contact</a>
-          </div>
-          <div className="text-sm text-muted-foreground">
-            © 2026 Splitvero. All rights reserved.
+          <div className="flex flex-col md:flex-row justify-between items-center gap-6 pt-8 border-t border-border/50">
+            <div className="flex items-center gap-2 font-bold text-xl text-foreground">
+              <Image src="/logo.png" alt="" width={24} height={24} className="w-6 h-6 opacity-80 grayscale" />
+              Splitvero
+            </div>
+            <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
+              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
+              <a href="mailto:hello@example.com" className="hover:text-foreground transition-colors">Contact</a>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              © 2026 Splitvero. All rights reserved.
+            </div>
           </div>
         </div>
       </footer>
@@ -320,5 +422,6 @@ export default function Home() {
         }}
       />
     </div>
+    </>
   );
 }

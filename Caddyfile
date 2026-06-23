@@ -1,7 +1,15 @@
+www.splitvero.com {
+    redir https://splitvero.com{uri} permanent
+}
+
 splitvero.com {
+    encode zstd gzip
+    @privateGroups path /groups/*
+    header @privateGroups X-Robots-Tag "noindex, nofollow"
     reverse_proxy host.docker.internal:3000
 }
 
 api.splitvero.com {
+    encode zstd gzip
     reverse_proxy backend:8000
 }

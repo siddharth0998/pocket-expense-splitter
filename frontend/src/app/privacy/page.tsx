@@ -1,4 +1,20 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description:
+    "Learn how Splitvero handles personal data for shared expense groups, receipts, and ledgers.",
+  alternates: {
+    canonical: "/privacy",
+  },
+  openGraph: {
+    title: "Privacy Policy | Splitvero",
+    description:
+      "Learn how Splitvero handles personal data for shared expense groups, receipts, and ledgers.",
+    url: "/privacy",
+  },
+};
 
 export default function PrivacyPolicy() {
   return (
