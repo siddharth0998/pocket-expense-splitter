@@ -705,6 +705,11 @@ export default function GroupDashboard() {
                     iconColorClass = 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400';
                     amountColorClass = 'text-zinc-600 dark:text-zinc-400';
                   }
+                } else if (!isPayment && item.payer_id) {
+                  if (item.payer_id === currentUserId) {
+                    amountColorClass = 'text-red-600';
+                    iconColorClass = 'bg-red-50 text-red-600';
+                  }
                 }
 
                 return (
@@ -724,7 +729,7 @@ export default function GroupDashboard() {
                         </div>
                         <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider flex items-center gap-2">
                           {isPayment ? <span>Payment</span> : item.generated_for_month ? <span>Monthly</span> : (
-                            <span className={item.payer_id === currentUserId ? "text-red-500 font-bold" : ""}>
+                            <span>
                               Paid by {item.payer_id === currentUserId ? 'YOU' : (item.payer_name || 'Unknown')}
                             </span>
                           )}
