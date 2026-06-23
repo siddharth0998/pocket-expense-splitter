@@ -723,7 +723,11 @@ export default function GroupDashboard() {
                           )}
                         </div>
                         <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider flex items-center gap-2">
-                          <span>{isPayment ? "Payment" : item.generated_for_month ? "Monthly" : `Paid by ${item.payer_name || 'Unknown'}`}</span>
+                          {isPayment ? <span>Payment</span> : item.generated_for_month ? <span>Monthly</span> : (
+                            <span className={item.payer_id === currentUserId ? "text-red-500 font-bold" : ""}>
+                              Paid by {item.payer_id === currentUserId ? 'YOU' : (item.payer_name || 'Unknown')}
+                            </span>
+                          )}
                           {item.created_at && (
                             <>
                               <span>•</span>
