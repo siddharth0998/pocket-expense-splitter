@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_this_password}
       POSTGRES_DB: ${POSTGRES_DB:-pocket}
     ports:
-      - "127.0.0.1:5432:5432" # Binds to localhost only for security
+      - "127.0.0.1:5433:5432" # Binds to localhost only for security
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:

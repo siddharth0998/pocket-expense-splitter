@@ -9,7 +9,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download } from "lucide-react";
+import { ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download, Pencil, Check, X } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WelcomeModal } from "@/components/welcome-modal";
 import {
@@ -116,6 +116,9 @@ export default function Home() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [editNameValue, setEditNameValue] = useState("");
+  const [isSavingName, setIsSavingName] = useState(false);
   const [pendingAction, setPendingAction] = useState<"create" | "login">("create");
 
   const fetchGroups = async () => {
@@ -137,6 +140,25 @@ export default function Home() {
     localStorage.removeItem("splitvero_user_name");
     setUserName(null);
     setGroups([]);
+  };
+
+  const handleSaveName = async () => {
+    if (!editNameValue.trim()) return;
+    const userId = localStorage.getItem("splitvero_user_id");
+    if (!userId) return;
+
+    try {
+      setIsSavingName(true);
+      await api.updateUser(userId, editNameValue.trim());
+      localStorage.setItem("splitvero_user_name", editNameValue.trim());
+      setUserName(editNameValue.trim());
+      setIsEditingName(false);
+    } catch (error) {
+      console.error("Failed to update name:", error);
+      alert("Failed to update name.");
+    } finally {
+      setIsSavingName(false);
+    }
   };
 
   const handleCreateGroup = async (e: React.FormEvent) => {
@@ -188,8 +210,35 @@ export default function Home() {
         <div className="flex items-center gap-4">
           {userName ? (
             <div className="flex items-center gap-2 text-sm font-medium">
-              <span className="hidden sm:inline-block truncate max-w-[150px]">{userName}</span>
-              <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground text-xs font-bold px-2 py-1 bg-secondary rounded-md transition-colors">Sign Out</button>
+              {isEditingName ? (
+                <div className="flex items-center gap-1">
+                  <Input 
+                    value={editNameValue} 
+                    onChange={(e) => setEditNameValue(e.target.value)}
+                    className="h-7 px-2 py-1 w-[120px] text-xs"
+                    autoFocus
+                    disabled={isSavingName}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveName();
+                      if (e.key === 'Escape') setIsEditingName(false);
+                    }}
+                  />
+                  <button disabled={isSavingName} onClick={handleSaveName} className="p-1 hover:bg-secondary rounded"><Check className="w-3.5 h-3.5 text-green-500" /></button>
+                  <button disabled={isSavingName} onClick={() => setIsEditingName(false)} className="p-1 hover:bg-secondary rounded"><X className="w-3.5 h-3.5 text-red-500" /></button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1 group">
+                  <span className="hidden sm:inline-block truncate max-w-[150px]">{userName}</span>
+                  <button 
+                    onClick={() => { setEditNameValue(userName); setIsEditingName(true); }}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded transition-opacity"
+                    title="Edit Name"
+                  >
+                    <Pencil className="w-3 h-3 text-muted-foreground" />
+                  </button>
+                </div>
+              )}
+              <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground text-xs font-bold px-2 py-1 bg-secondary rounded-md transition-colors ml-2">Sign Out</button>
             </div>
           ) : (
             <button

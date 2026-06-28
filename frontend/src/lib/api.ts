@@ -87,6 +87,9 @@ export const api = {
   createUser: (name: string, email: string) => 
     fetchAPI("/users/", { method: "POST", body: JSON.stringify({ name, email }) }),
     
+  updateUser: (userId: string, name: string) => 
+    fetchAPI(`/users/${userId}`, { method: "PUT", body: JSON.stringify({ name }) }),
+    
   createGroup: (name: string) => 
     fetchAPI("/groups/", { method: "POST", body: JSON.stringify({ name }) }),
     

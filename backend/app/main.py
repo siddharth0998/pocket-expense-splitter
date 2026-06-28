@@ -95,6 +95,9 @@ class UserCreate(BaseModel):
     name: str
     email: str
 
+class UserUpdate(BaseModel):
+    name: str
+
 class GroupCreate(BaseModel):
     name: str
 
@@ -336,25 +339,44 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
                         &copy; 2026 Splitvero Expense Splitter. All rights reserved.
                     </p>
                 </td>
-            </tr>
         </table>
     </body>
     </html>
     """
-    send_email(email, "Splitvero Verification Code", html)
+    
+    # Check if we are in local dev via docker-compose.override.yml
+    is_dev = os.getenv("IS_LOCAL_DEV") == "true"
+    
+    if is_dev:
+        print(f"=====================================")
+        print(f"DEVELOPMENT MODE: OTP for {email} is {code}")
+        print(f"=====================================")
+    else:
+        send_email(email, "Splitvero Verification Code", html)
+        
     return {"message": "OTP sent"}
 
 @app.post("/users/verify-otp")
 def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
     email = payload.email.lower().strip()
+    code = payload.code.strip()
+    
+    # Check for local development bypass
+    is_dev = os.getenv("IS_LOCAL_DEV") == "true"
+    
     otp_record = db.query(models.UserOTP).filter(models.UserOTP.email == email).first()
     
-    if not otp_record or otp_record.otp_code != payload.code.strip():
-        raise HTTPException(401, "Invalid or expired verification code")
+    if is_dev and code == "123456":
+        # Master bypass for dev
+        pass
+    else:
+        if not otp_record or otp_record.otp_code != code:
+            raise HTTPException(401, "Invalid or expired verification code")
+            
+        if otp_record.expires_at < datetime.utcnow():
+            raise HTTPException(401, "Verification code has expired")
         
-    if otp_record.expires_at < datetime.utcnow():
-        raise HTTPException(401, "Verification code has expired")
-        
+
     # Valid! Find or create user.
     user = db.query(models.User).filter(models.User.email == email).first()
     if not user:
@@ -403,6 +425,16 @@ def create_user(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_user)
     return {"id": db_user.id, "name": db_user.name}
+
+@app.put("/users/{user_id}")
+def update_user(user_id: str, user_update: UserUpdate, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(404, "User not found")
+    user.name = user_update.name
+    db.commit()
+    db.refresh(user)
+    return {"id": user.id, "name": user.name}
 
 @app.post("/groups/")
 def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
