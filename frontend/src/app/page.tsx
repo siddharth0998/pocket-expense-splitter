@@ -1,7 +1,7 @@
 // src/app/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -119,6 +119,8 @@ export default function Home() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState("");
   const [isSavingName, setIsSavingName] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
   const [pendingAction, setPendingAction] = useState<"create" | "login">("create");
 
   const fetchGroups = async () => {
@@ -135,11 +137,25 @@ export default function Home() {
     fetchGroups();
   }, []);
 
+  // Handle clicking outside of the profile menu to close it
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    }
+    if (isProfileMenuOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [isProfileMenuOpen]);
+
   const handleLogout = () => {
     localStorage.removeItem("splitvero_user_id");
     localStorage.removeItem("splitvero_user_name");
     setUserName(null);
     setGroups([]);
+    setIsProfileMenuOpen(false);
   };
 
   const handleSaveName = async () => {
@@ -203,14 +219,14 @@ export default function Home() {
 
       {/* HEADER */}
       <header className="w-full flex justify-between items-center p-4 md:px-8 absolute top-0 z-50">
-        <div className="flex items-center gap-2 font-bold text-xl text-foreground">
+        <div className="flex items-center gap-2 font-bold text-xl text-foreground shrink-0">
           <Image src="/logo.png" alt="" width={32} height={32} priority className="w-8 h-8" />
-          Splitvero
+          <span className={isEditingName ? "hidden sm:inline-block" : "inline-block"}>Splitvero</span>
           <a href="mailto:splitverosupport@gmail.com?subject=Splitvero Bug Report" className="ml-2 text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary px-2 py-0.5 rounded-full hover:bg-primary/20 transition-colors hidden sm:block border border-primary/20">Beta</a>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           {userName ? (
-            <div className="flex items-center gap-2 text-sm font-medium">
+            <div ref={profileMenuRef} className="flex items-center gap-2 text-sm font-medium relative">
               {isEditingName ? (
                 <div className="flex items-center gap-1">
                   <Input 
@@ -228,18 +244,37 @@ export default function Home() {
                   <button disabled={isSavingName} onClick={() => setIsEditingName(false)} className="p-1 hover:bg-secondary rounded"><X className="w-3.5 h-3.5 text-red-500" /></button>
                 </div>
               ) : (
-                <div className="flex items-center gap-1 group">
-                  <span className="hidden sm:inline-block truncate max-w-[150px]">{userName}</span>
+                <>
                   <button 
-                    onClick={() => { setEditNameValue(userName); setIsEditingName(true); }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded transition-opacity"
-                    title="Edit Name"
+                    className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold flex items-center justify-center shadow-md shadow-indigo-500/20 hover:scale-105 transition-transform shrink-0"
+                    onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
                   >
-                    <Pencil className="w-3 h-3 text-muted-foreground" />
+                    {userName.charAt(0).toUpperCase()}
                   </button>
-                </div>
+
+                  {/* Dropdown Menu */}
+                  {isProfileMenuOpen && (
+                    <div className="absolute top-12 right-0 w-52 bg-background/80 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 duration-200">
+                      <div className="px-3 py-2 border-b border-border/50 mb-1">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-0.5">Signed In As</div>
+                        <div className="text-sm font-bold truncate text-foreground">{userName}</div>
+                      </div>
+                      <button 
+                        onClick={() => { setIsProfileMenuOpen(false); setEditNameValue(userName); setIsEditingName(true); }}
+                        className="text-left text-sm px-3 py-2.5 hover:bg-primary/10 rounded-xl transition-colors flex items-center gap-3 font-medium text-foreground"
+                      >
+                        <Pencil className="w-4 h-4 text-primary" /> Change Name
+                      </button>
+                      <button 
+                        onClick={handleLogout} 
+                        className="text-left text-sm px-3 py-2.5 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors flex items-center gap-3 font-medium mt-1"
+                      >
+                        <X className="w-4 h-4" /> Sign Out
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
-              <button onClick={handleLogout} className="text-muted-foreground hover:text-foreground text-xs font-bold px-2 py-1 bg-secondary rounded-md transition-colors ml-2">Sign Out</button>
             </div>
           ) : (
             <button

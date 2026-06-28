@@ -572,6 +572,13 @@ def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(ge
         raise HTTPException(status_code=400, detail="Cannot leave group with an unsettled balance. Please settle up first.")
         
     group.members.remove(user)
+    
+    # If the group is now empty, delete it
+    if len(group.members) == 0:
+        db.delete(group)
+        db.commit()
+        return {"message": f"Removed {user.name} and deleted empty group '{group.name}'"}
+        
     db.commit()
     return {"message": f"Removed {user.name} from {group.name}"}
 

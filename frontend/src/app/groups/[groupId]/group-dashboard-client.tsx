@@ -170,7 +170,11 @@ export default function GroupDashboard() {
     if (!window.confirm(msg)) return;
     try {
       await api.removeMemberFromGroup(groupId as string, userId);
-      void loadData();
+      if (isSelf) {
+        window.location.href = "/";
+      } else {
+        void loadData();
+      }
     } catch (err: any) {
       alert(err.message || "Failed to remove member. They might have unsettled debts!");
     }
