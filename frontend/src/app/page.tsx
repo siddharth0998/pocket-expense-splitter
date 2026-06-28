@@ -206,6 +206,7 @@ export default function Home() {
         <div className="flex items-center gap-2 font-bold text-xl text-foreground">
           <Image src="/logo.png" alt="" width={32} height={32} priority className="w-8 h-8" />
           Splitvero
+          <a href="mailto:splitverosupport@gmail.com?subject=Splitvero Bug Report" className="ml-2 text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary px-2 py-0.5 rounded-full hover:bg-primary/20 transition-colors hidden sm:block border border-primary/20">Beta</a>
         </div>
         <div className="flex items-center gap-4">
           {userName ? (
@@ -448,7 +449,7 @@ export default function Home() {
             <div className="flex flex-wrap justify-center gap-6 text-sm text-muted-foreground">
               <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link>
               <Link href="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link>
-              <a href="mailto:hello@example.com" className="hover:text-foreground transition-colors">Contact</a>
+              <a href="mailto:splitverosupport@gmail.com" className="hover:text-foreground transition-colors">Contact</a>
             </div>
             <div className="text-sm text-muted-foreground">
               © 2026 Splitvero. All rights reserved.

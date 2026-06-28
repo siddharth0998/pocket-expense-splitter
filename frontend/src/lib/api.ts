@@ -124,8 +124,24 @@ export const api = {
   getFeed: (groupId: string) => 
     fetchAPI(`/groups/${groupId}/feed`),
 
-  getExportUrl: (groupId: string) =>
-    `${API_BASE_URL}/groups/${groupId}/export.csv`,
+  exportGroupCsv: async (groupId: string) => {
+    const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
+    const headers: Record<string, string> = {};
+    if (userId) headers["X-User-Id"] = userId;
+    
+    const res = await fetch(`${API_BASE_URL}/groups/${groupId}/export.csv`, { headers });
+    if (!res.ok) throw new Error("Failed to export CSV");
+    
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `splitvero-group-${groupId}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
 
   // Math & Settlements
   getSuggestedSettlements: (groupId: string) => 

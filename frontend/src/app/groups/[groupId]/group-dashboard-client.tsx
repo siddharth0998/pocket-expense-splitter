@@ -360,7 +360,7 @@ export default function GroupDashboard() {
           <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border hover:border-primary/50" onClick={() => setIsViewMembersModalOpen(true)} title="View Members">
             <Users className="w-5 h-5 text-muted-foreground hover:text-primary transition-colors" />
           </Button>
-          <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border" onClick={() => window.location.href = api.getExportUrl(groupId)} title="Export CSV">
+          <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border" onClick={() => api.exportGroupCsv(groupId)} title="Export CSV">
             <Download className="w-5 h-5 text-muted-foreground" />
           </Button>
           <Button variant="outline" size="icon" className="rounded-full bg-card shadow-sm h-12 w-12 border-border hover:border-red-200 hover:bg-red-50" onClick={handleDeleteGroup} title="Delete Group">
