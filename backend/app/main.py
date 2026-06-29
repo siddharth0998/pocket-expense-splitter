@@ -40,6 +40,7 @@ def ensure_schema_compatibility():
         "receipt_filename": "VARCHAR",
         "recurring_template_id": "VARCHAR",
         "generated_for_month": "VARCHAR",
+        "creator_id": "VARCHAR",
     }
     missing_columns = [name for name in column_sql if name not in existing_columns]
     
@@ -177,13 +178,15 @@ def create_expense_rows(
     payer_id: str,
     description: str,
     amount: float,
-    splits: List[SplitCreate],
+    splits: list[SplitCreate],
+    creator_id: Optional[str] = None,
     recurring_template_id: Optional[str] = None,
     generated_for_month: Optional[str] = None,
-):
+) -> models.Expense:
     db_expense = models.Expense(
         group_id=group_id,
         payer_id=payer_id,
+        creator_id=creator_id,
         description=description,
         amount=amount,
         recurring_template_id=recurring_template_id,
@@ -622,6 +625,7 @@ def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db), x_user
         description=expense.description,
         amount=expense.amount,
         splits=expense.splits,
+        creator_id=x_user_id,
     )
     db.commit()
     return {"message": "Expense recorded", "expense_id": db_expense.id}
@@ -725,6 +729,25 @@ def delete_expense(expense_id: str, db: Session = Depends(get_db), x_user_id: Op
     group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
     if not group or x_user_id not in [m.id for m in group.members]:
         raise HTTPException(status_code=403, detail="Unauthorized")
+        
+    # Check if the user is the creator (or payer for grandfathered expenses)
+    if expense.creator_id:
+        if expense.creator_id != x_user_id:
+            raise HTTPException(status_code=403, detail="Only the person who created this expense can delete it")
+    else:
+        # Fallback for old expenses before creator_id was added
+        if expense.payer_id != x_user_id:
+            raise HTTPException(status_code=403, detail="Only the person who created this expense can delete it")
+            
+    # Lock the expense if a settlement has occurred since it was created
+    has_settlement = db.query(models.Settlement).filter(
+        models.Settlement.group_id == expense.group_id,
+        models.Settlement.created_at >= expense.created_at,
+        models.Settlement.is_deleted == False
+    ).first()
+    
+    if has_settlement:
+        raise HTTPException(status_code=400, detail="This expense is locked because a settlement has been made since it was created.")
     
     expense.is_deleted = True
     db.commit()
@@ -748,6 +771,9 @@ def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db
     member_ids = {m.id for m in group.members}
     if x_user_id not in member_ids:
         raise HTTPException(status_code=403, detail="Unauthorized to settle in this group")
+        
+    if x_user_id != settlement.payer_id and x_user_id != settlement.receiver_id:
+        raise HTTPException(status_code=403, detail="You can only settle your own debts")
     if settlement.payer_id not in member_ids or settlement.receiver_id not in member_ids:
         raise HTTPException(status_code=400, detail="Both settlement users must be in the group")
 
@@ -773,8 +799,12 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
     settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
 
+    latest_settlement = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).order_by(models.Settlement.created_at.desc()).first()
+    latest_settlement_date = latest_settlement.created_at if latest_settlement else None
+
     feed = []
     for e in expenses:
+        is_locked = bool(latest_settlement_date and e.created_at <= latest_settlement_date)
         feed.append({
             "type": "expense",
             "id": e.id,
@@ -782,11 +812,13 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
             "amount": float(e.amount),
             "payer_id": e.payer_id,
             "payer_name": user_names.get(e.payer_id, "Unknown"),
+            "creator_id": e.creator_id,
             "receipt_url": e.receipt_url,
             "receipt_filename": e.receipt_filename,
             "recurring_template_id": e.recurring_template_id,
             "generated_for_month": e.generated_for_month,
-            "created_at": e.created_at.isoformat() + "Z"
+            "created_at": e.created_at.isoformat() + "Z",
+            "is_locked": is_locked
         })
     for s in settlements:
         feed.append({

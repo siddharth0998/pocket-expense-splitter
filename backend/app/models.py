@@ -24,7 +24,7 @@ class User(Base):
 
     # Relationships
     groups = relationship("Group", secondary=group_members, back_populates="members")
-    expenses_paid = relationship("Expense", back_populates="payer")
+    expenses_paid = relationship("Expense", back_populates="payer", foreign_keys="[Expense.payer_id]")
     settlements_paid = relationship("Settlement", foreign_keys="[Settlement.payer_id]")
     settlements_received = relationship("Settlement", foreign_keys="[Settlement.receiver_id]")
 
@@ -56,6 +56,7 @@ class Expense(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     group_id = Column(String, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True) # Added Index and Cascade
+    creator_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True) # Nullable for grandfathering
     payer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     description = Column(String, nullable=False)
     amount = Column(Numeric(10, 2), nullable=False) # Precision Loophole Fix
@@ -73,7 +74,8 @@ class Expense(Base):
 
     # Relationships
     group = relationship("Group", back_populates="expenses")
-    payer = relationship("User", back_populates="expenses_paid")
+    payer = relationship("User", back_populates="expenses_paid", foreign_keys=[payer_id])
+    creator = relationship("User", foreign_keys=[creator_id])
     splits = relationship("ExpenseSplit", back_populates="expense", cascade="all, delete-orphan")
     recurring_template = relationship("RecurringExpenseTemplate", back_populates="generated_expenses")
 

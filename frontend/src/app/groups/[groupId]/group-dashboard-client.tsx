@@ -44,8 +44,10 @@ type FeedItem = {
   created_at?: string;
   payer_id?: string;
   payer_name?: string;
+  creator_id?: string;
   receiver_id?: string;
   receiver_name?: string;
+  is_locked?: boolean;
 };
 
 type SuggestedSettlement = {
@@ -124,7 +126,16 @@ export default function GroupDashboard() {
       const loadedGroup = groupData as Group;
       setGroup(loadedGroup);
       setFeed(Array.isArray(feedData) ? feedData : feedData?.feed || []);
-      setSettlements(Array.isArray(settlementData) ? settlementData : settlementData?.settlements || []);
+      const loadedSettlements = Array.isArray(settlementData) ? settlementData : settlementData?.settlements || [];
+      const uid = localStorage.getItem("splitvero_user_id");
+      loadedSettlements.sort((a: SuggestedSettlement, b: SuggestedSettlement) => {
+        const aInvolved = a.payer_id === uid || a.receiver_id === uid;
+        const bInvolved = b.payer_id === uid || b.receiver_id === uid;
+        if (aInvolved && !bInvolved) return -1;
+        if (!aInvolved && bInvolved) return 1;
+        return 0;
+      });
+      setSettlements(loadedSettlements);
       setRecurringExpenses(Array.isArray(recurringData) ? recurringData : recurringData?.recurring_expenses || []);
 
       // Default to all members being involved in new expenses
@@ -615,6 +626,7 @@ export default function GroupDashboard() {
           ) : (
             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
               {settlements.map((s, index) => {
+                const isInvolved = s.payer_id === currentUserId || s.receiver_id === currentUserId;
                 let iconColorClass = 'bg-red-50 text-red-600';
                 let amountColorClass = 'text-red-600';
                 let iconElement = <ArrowRightLeft className="w-6 h-6 text-red-500" />;
@@ -642,7 +654,7 @@ export default function GroupDashboard() {
                 }
 
                 return (
-                <div key={index} className="overflow-hidden border border-border shadow-md rounded-[2.5rem] bg-card hover:shadow-lg transition-shadow">
+                <div key={index} className={`overflow-hidden border shadow-md rounded-[2.5rem] hover:shadow-lg transition-shadow ${isInvolved ? 'bg-primary/5 border-primary/20' : 'bg-card border-border'}`}>
                   <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
                     <div className="flex items-center gap-5">
                       <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center shrink-0 ${iconColorClass}`}>
@@ -657,13 +669,15 @@ export default function GroupDashboard() {
                         </div>
                       </div>
                     </div>
-                    <Button
-                      size="lg"
-                      className="rounded-full w-full sm:w-auto font-semibold px-8"
-                      onClick={() => openSettleModal(s.payer_name, s.payer_id, s.receiver_name, s.receiver_id, s.amount)}
-                    >
-                      Settle
-                    </Button>
+                    {isInvolved && (
+                      <Button
+                        size="lg"
+                        className="rounded-full w-full sm:w-auto font-semibold px-8"
+                        onClick={() => openSettleModal(s.payer_name, s.payer_id, s.receiver_name, s.receiver_id, s.amount)}
+                      >
+                        Settle
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
@@ -752,7 +766,7 @@ export default function GroupDashboard() {
                       <div className={`font-extrabold text-lg tracking-tight ${amountColorClass}`}>
                         ${item.amount.toFixed(2)}
                       </div>
-                      {item.type === "expense" && (
+                      {item.type === "expense" && !item.is_locked && (item.creator_id ? item.creator_id === currentUserId : item.payer_id === currentUserId) && (
                         <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-300 hover:text-red-500 hover:bg-red-50 w-10 h-10 rounded-full shrink-0">
                           <Trash2 className="w-5 h-5" />
                         </Button>
