@@ -19,8 +19,6 @@ services:
   backend:
     build: ./backend
     container_name: pocket_backend
-    ports:
-      - "8000:8000"
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-change_this_password}@db:5432/${POSTGRES_DB:-pocket}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
