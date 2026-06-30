@@ -2,12 +2,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { WelcomeModal } from "@/components/welcome-modal";
-import { API_BASE_URL, api } from "@/lib/api";
-import { Card } from "@/components/ui/card";
+import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -15,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, CheckCircle2, LogOut } from "lucide-react";
+import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, LogOut } from "lucide-react";
 
 type Member = {
   id: string;
@@ -77,6 +75,7 @@ const errorMessage = (error: unknown, fallback: string) =>
 
 export default function GroupDashboard() {
   const params = useParams();
+  const router = useRouter();
   const groupId = params.groupId as string;
 
   // --- State ---
@@ -86,7 +85,12 @@ export default function GroupDashboard() {
   const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    return localStorage.getItem("splitvero_user_id");
+  });
 
   // Modal States
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
@@ -142,18 +146,18 @@ export default function GroupDashboard() {
       if (loadedGroup?.members) {
         setInvolvedMembers(loadedGroup.members.map((m) => m.id));
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Failed to load group data", error);
-      setError(error.message || "Failed to load group.");
+      setError(errorMessage(error, "Failed to load group."));
     } finally {
       setIsLoading(false);
     }
   }, [groupId]);
 
   useEffect(() => {
-    setCurrentUserId(localStorage.getItem("splitvero_user_id"));
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadData();
+    queueMicrotask(() => {
+      void loadData();
+    });
   }, [loadData]);
 
   // --- Actions ---
@@ -167,8 +171,8 @@ export default function GroupDashboard() {
       setNewMemberEmail("");
       setIsMemberModalOpen(false);
       void loadData();
-    } catch (err: any) {
-      alert(err.message || "Failed to add member");
+    } catch (err: unknown) {
+      alert(errorMessage(err, "Failed to add member"));
     }
   };
 
@@ -182,12 +186,12 @@ export default function GroupDashboard() {
     try {
       await api.removeMemberFromGroup(groupId as string, userId);
       if (isSelf) {
-        window.location.href = "/";
+        router.push("/");
       } else {
         void loadData();
       }
-    } catch (err: any) {
-      alert(err.message || "Failed to remove member. They might have unsettled debts!");
+    } catch (err: unknown) {
+      alert(errorMessage(err, "Failed to remove member. They might have unsettled debts!"));
     }
   };
 
@@ -301,7 +305,7 @@ export default function GroupDashboard() {
     if (!window.confirm(`Are you sure you want to delete "${group.name}"? This cannot be undone.`)) return;
     try {
       await api.deleteGroup(groupId);
-      window.location.href = "/"; // Navigate back home
+      router.push("/");
     } catch (error: unknown) {
       alert(errorMessage(error, "Failed to delete group. Ensure all debts are settled first."));
     }
@@ -321,6 +325,14 @@ export default function GroupDashboard() {
     }
   };
 
+  const handleOpenReceipt = async (receiptUrl: string) => {
+    try {
+      await api.openReceipt(receiptUrl);
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to open receipt."));
+    }
+  };
+
   // --- Render ---
   if (error) return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background">
@@ -328,7 +340,7 @@ export default function GroupDashboard() {
         <h2 className="text-2xl font-black">Access Denied</h2>
         <p className="font-medium">{error}</p>
         <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center">
-          <Button onClick={() => window.location.href = '/'} variant="outline" className="rounded-full shadow-sm h-12 px-6">Go Home</Button>
+          <Button onClick={() => router.push('/')} variant="outline" className="rounded-full shadow-sm h-12 px-6">Go Home</Button>
           <Button onClick={() => setIsWelcomeModalOpen(true)} variant="default" className="rounded-full shadow-lg h-12 px-6">Identify Yourself</Button>
         </div>
       </div>
@@ -702,7 +714,6 @@ export default function GroupDashboard() {
               </div>
             ) : (
               feed.map((item, index) => {
-                const receiptHref = item.receipt_url?.startsWith("http") ? item.receipt_url : `${API_BASE_URL}${item.receipt_url}`;
                 const isPayment = item.type === "settlement";
                 
                 let iconColorClass = isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary';
@@ -740,9 +751,9 @@ export default function GroupDashboard() {
                         <div className="font-bold text-foreground flex items-center gap-2 text-base">
                           {descriptionText}
                           {item.receipt_url && (
-                            <a href={receiptHref} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-primary transition-colors" title="Open receipt">
+                            <button type="button" onClick={() => handleOpenReceipt(item.receipt_url!)} className="text-muted-foreground hover:text-primary transition-colors" title="Open receipt">
                               <Paperclip className="w-4 h-4" />
-                            </a>
+                            </button>
                           )}
                         </div>
                         <div className="text-xs font-semibold text-muted-foreground mt-1 uppercase tracking-wider flex items-center gap-2">

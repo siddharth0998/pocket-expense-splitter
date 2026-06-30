@@ -1,13 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import Image from "next/image";
+import { AUTH_TOKEN_STORAGE_KEY, api } from "@/lib/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Wallet, ArrowLeft } from "lucide-react";
-import { GoogleOAuthProvider, GoogleLogin } from "@react-oauth/google";
+import { ArrowLeft } from "lucide-react";
+import { GoogleOAuthProvider, GoogleLogin, type CredentialResponse } from "@react-oauth/google";
+
+const errorMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
 
 export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; onClose: () => void; onSuccess: () => void; }) {
   const [step, setStep] = useState<1 | 2>(1);
@@ -26,8 +30,8 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
       setIsLoading(true);
       await api.requestOtp(email.trim().toLowerCase());
       setStep(2);
-    } catch (error: any) {
-      alert(error.message || "Failed to send verification code.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to send verification code."));
     } finally {
       setIsLoading(false);
     }
@@ -41,29 +45,30 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
       setIsLoading(true);
       const user = await api.verifyOtp(email.trim().toLowerCase(), otpCode.trim());
       finishLogin(user);
-    } catch (error: any) {
-      alert(error.message || "Invalid or expired code.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Invalid or expired code."));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleGoogleSuccess = async (credentialResponse: any) => {
+  const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
     if (!credentialResponse.credential) return;
     try {
       setIsLoading(true);
       const user = await api.googleLogin(credentialResponse.credential);
       finishLogin(user);
-    } catch (error: any) {
-      alert(error.message || "Google Sign-In failed.");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Google Sign-In failed."));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const finishLogin = (user: { id: string, name: string }) => {
+  const finishLogin = (user: { id: string, name: string, token: string }) => {
     localStorage.setItem("splitvero_user_id", user.id);
     localStorage.setItem("splitvero_user_name", user.name);
+    localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, user.token);
     setStep(1);
     setOtpCode("");
     onSuccess();
@@ -89,7 +94,7 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
-            <img src="/logo.png" alt="Splitvero Logo" className="w-16 h-16 mx-auto" />
+            <Image src="/logo.png" alt="Splitvero Logo" width={64} height={64} className="w-16 h-16 mx-auto" />
             <DialogTitle className="text-2xl font-extrabold tracking-tight">
               {step === 1 ? "Who are you?" : "Check your email"}
             </DialogTitle>

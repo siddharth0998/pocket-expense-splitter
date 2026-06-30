@@ -92,7 +92,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased" suppressHydrationWarning>
-      <head>
+      <head />
+      <body className="min-h-full flex flex-col">
         <Script
           strategy="afterInteractive"
           src="https://www.googletagmanager.com/gtag/js?id=G-JEDHRZD2NG"
@@ -108,8 +109,52 @@ export default function RootLayout({
             gtag('config', 'G-JEDHRZD2NG');
           `}
         </Script>
-      </head>
-      <body className="min-h-full flex flex-col">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@graph": [
+                {
+                  "@type": "Organization",
+                  "@id": "https://splitvero.com/#organization",
+                  "name": "Splitvero",
+                  "url": "https://splitvero.com",
+                  "logo": "https://splitvero.com/logo.png"
+                },
+                {
+                  "@type": "WebApplication",
+                  "@id": "https://splitvero.com/#webapp",
+                  "name": "Splitvero",
+                  "url": "https://splitvero.com",
+                  "applicationCategory": "FinanceApplication",
+                  "operatingSystem": "Web",
+                  "description": "A free expense splitter for friends, roommates, and travel groups to split bills, track shared expenses, upload receipts, and settle up.",
+                  "creator": { "@id": "https://splitvero.com/#organization" },
+                  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+                  "featureList": [
+                    "Equal and exact expense splits",
+                    "Recurring monthly expenses",
+                    "Receipt uploads",
+                    "Minimized settle-up payments",
+                    "CSV export"
+                  ]
+                },
+                {
+                  "@type": "FAQPage",
+                  "@id": "https://splitvero.com/#faq",
+                  "mainEntity": [
+                    { "@type": "Question", "name": "Is Splitvero free to use?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, Splitvero is free to use with no hidden fees or premium tiers." } },
+                    { "@type": "Question", "name": "How are settlements calculated?", "acceptedAnswer": { "@type": "Answer", "text": "Splitvero uses a min-cash-flow algorithm to reduce the total number of transactions between group members." } },
+                    { "@type": "Question", "name": "Do my friends need to create accounts?", "acceptedAnswer": { "@type": "Answer", "text": "Friends can log in using a secure one-time passcode or Google Sign-In to view the group and add expenses." } },
+                    { "@type": "Question", "name": "Can I split expenses unequally?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. You can switch from equal splits to exact splits and manually assign who owes what." } },
+                    { "@type": "Question", "name": "Who is the admin of the group?", "acceptedAnswer": { "@type": "Answer", "text": "Splitvero uses a high trust model where anyone in the group can add members, record expenses, or remove members when debts are settled." } }
+                  ]
+                }
+              ]
+            }).replace(/</g, "\\u003c")
+          }}
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

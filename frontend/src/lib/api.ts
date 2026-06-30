@@ -1,6 +1,7 @@
 // src/lib/api.ts
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const AUTH_TOKEN_STORAGE_KEY = "splitvero_auth_token";
 
 // --- Types ---
 export interface Split {
@@ -29,14 +30,18 @@ export interface SettlementPayload {
 }
 
 // --- Helper for Fetching ---
+function getAuthToken() {
+  return typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) : null;
+}
+
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
-  const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
+  const token = getAuthToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string> || {}),
   };
-  if (userId) {
-    headers["X-User-Id"] = userId;
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -52,10 +57,10 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
 }
 
 async function uploadAPI(endpoint: string, formData: FormData) {
-  const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
+  const token = getAuthToken();
   const headers: Record<string, string> = {};
-  if (userId) {
-    headers["X-User-Id"] = userId;
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
 
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -115,6 +120,27 @@ export const api = {
     return uploadAPI(`/expenses/${expenseId}/receipt`, formData);
   },
 
+  openReceipt: async (receiptUrl: string) => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const url = receiptUrl.startsWith("http") ? receiptUrl : `${API_BASE_URL}${receiptUrl}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error("Failed to open receipt");
+
+    const blob = await res.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+    document.body.removeChild(a);
+  },
+
   createRecurringExpense: (payload: RecurringExpensePayload) =>
     fetchAPI("/recurring-expenses/", { method: "POST", body: JSON.stringify(payload) }),
 
@@ -125,9 +151,9 @@ export const api = {
     fetchAPI(`/groups/${groupId}/feed`),
 
   exportGroupCsv: async (groupId: string) => {
-    const userId = typeof window !== 'undefined' ? localStorage.getItem("splitvero_user_id") : null;
+    const token = getAuthToken();
     const headers: Record<string, string> = {};
-    if (userId) headers["X-User-Id"] = userId;
+    if (token) headers["Authorization"] = `Bearer ${token}`;
     
     const res = await fetch(`${API_BASE_URL}/groups/${groupId}/export.csv`, { headers });
     if (!res.ok) throw new Error("Failed to export CSV");

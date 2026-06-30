@@ -28,9 +28,14 @@ services:
       - SMTP_PORT=${SMTP_PORT}
       - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - MAX_RECEIPT_BYTES=${MAX_RECEIPT_BYTES:-5242880}
+      - MAX_RECURRING_BACKFILL_MONTHS=${MAX_RECURRING_BACKFILL_MONTHS:-6}
     depends_on:
       db:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"
     volumes:
       # This allows you to edit code locally and see it update live without rebuilding
       - ./backend/app:/code/app

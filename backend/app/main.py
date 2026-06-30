@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response, Header
+from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Response, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
@@ -9,10 +9,17 @@ import os
 import csv
 import io
 import calendar
+import base64
+import hashlib
+import hmac
+import json
+import math
 from pathlib import Path
 from datetime import date, datetime, timedelta
-import random
+from decimal import Decimal
+import secrets
 import smtplib
+import time
 from email.message import EmailMessage
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -65,7 +72,21 @@ app = FastAPI(title="Splitvero - Expense Splitter API")
 UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "uploads")).resolve()
 RECEIPT_DIR = UPLOAD_DIR / "receipts"
 RECEIPT_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+AUTH_SECRET = os.getenv("AUTH_SECRET") or os.getenv("SECRET_KEY")
+if not AUTH_SECRET:
+    AUTH_SECRET = secrets.token_urlsafe(48)
+    print("WARNING: AUTH_SECRET is not configured. Tokens will be invalidated when this process restarts.")
+
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", str(60 * 60 * 24 * 30)))
+OTP_REQUEST_COOLDOWN_SECONDS = int(os.getenv("OTP_REQUEST_COOLDOWN_SECONDS", "60"))
+OTP_REQUEST_WINDOW_SECONDS = int(os.getenv("OTP_REQUEST_WINDOW_SECONDS", str(60 * 60)))
+OTP_REQUEST_MAX_PER_WINDOW = int(os.getenv("OTP_REQUEST_MAX_PER_WINDOW", "5"))
+OTP_VERIFY_WINDOW_SECONDS = int(os.getenv("OTP_VERIFY_WINDOW_SECONDS", str(10 * 60)))
+OTP_VERIFY_MAX_PER_WINDOW = int(os.getenv("OTP_VERIFY_MAX_PER_WINDOW", "8"))
+MAX_RECEIPT_BYTES = int(os.getenv("MAX_RECEIPT_BYTES", str(5 * 1024 * 1024)))
+MAX_RECURRING_BACKFILL_MONTHS = int(os.getenv("MAX_RECURRING_BACKFILL_MONTHS", "6"))
+MAX_RECURRING_GENERATIONS_PER_TEMPLATE = int(os.getenv("MAX_RECURRING_GENERATIONS_PER_TEMPLATE", "36"))
 
 # Get the allowed frontend URL from the environment, defaulting to localhost for dev
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -90,6 +111,92 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+def _b64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+def create_auth_token(user: models.User) -> str:
+    now = int(time.time())
+    payload = {
+        "sub": user.id,
+        "iat": now,
+        "exp": now + AUTH_TOKEN_TTL_SECONDS,
+    }
+    body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signature = hmac.new(AUTH_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+    return f"{body}.{_b64url_encode(signature)}"
+
+def verify_auth_token(token: str) -> str:
+    try:
+        body, supplied_signature = token.split(".", 1)
+        expected_signature = hmac.new(AUTH_SECRET.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
+        supplied_signature_bytes = _b64url_decode(supplied_signature)
+        if not hmac.compare_digest(expected_signature, supplied_signature_bytes):
+            raise ValueError("Bad token signature")
+        payload = json.loads(_b64url_decode(body))
+        if int(payload.get("exp", 0)) < int(time.time()):
+            raise ValueError("Expired token")
+        user_id = payload.get("sub")
+        if not isinstance(user_id, str) or not user_id:
+            raise ValueError("Missing token subject")
+        return user_id
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+
+def get_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+    return token.strip()
+
+def get_optional_current_user(
+    authorization: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+) -> Optional[models.User]:
+    token = get_bearer_token(authorization)
+    if not token:
+        return None
+    user_id = verify_auth_token(token)
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Session user no longer exists")
+    return user
+
+def get_current_user(current_user: Optional[models.User] = Depends(get_optional_current_user)) -> models.User:
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return current_user
+
+def auth_user_response(user: models.User):
+    return {"id": user.id, "name": user.name, "token": create_auth_token(user)}
+
+def hash_otp(email: str, code: str) -> str:
+    return hmac.new(AUTH_SECRET.encode("utf-8"), f"{email}:{code}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+def prune_timestamps(timestamps: list[datetime], now: datetime, window_seconds: int) -> list[datetime]:
+    cutoff = now - timedelta(seconds=window_seconds)
+    return [timestamp for timestamp in timestamps if timestamp > cutoff]
+
+def require_group_member(
+    group_id: str,
+    current_user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> models.Group:
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    member_ids = {member.id for member in group.members}
+    if current_user.id not in member_ids:
+        raise HTTPException(status_code=403, detail="You are not a member of this group")
+
+    return group
 
 # Pydantic Schemas
 class UserCreate(BaseModel):
@@ -142,10 +249,52 @@ def first_monthly_run(start: date, day_of_month: int) -> date:
         return next_monthly_run(run_on, day_of_month)
     return run_on
 
-def validate_ledger_payload(payload: Any, db: Session, x_user_id: str):
-    if not x_user_id:
+def estimated_monthly_runs(first_run: date, through: date) -> int:
+    if first_run > through:
+        return 0
+    return (through.year - first_run.year) * 12 + through.month - first_run.month + 1
+
+def detect_image_type(header: bytes) -> Optional[str]:
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+        return "image/gif"
+    if len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+def media_type_for_filename(filename: str) -> str:
+    suffix = Path(filename).suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".png":
+        return "image/png"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".gif":
+        return "image/gif"
+    return "application/octet-stream"
+
+def receipt_file_path(expense: models.Expense) -> Path:
+    if not expense.receipt_url:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    filename = Path(expense.receipt_url).name
+    if not filename:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    path = (RECEIPT_DIR / filename).resolve()
+    if not path.is_relative_to(RECEIPT_DIR.resolve()) or not path.exists():
+        raise HTTPException(status_code=404, detail="Receipt not found")
+
+    return path
+
+def validate_ledger_payload(payload: Any, db: Session, current_user_id: str):
+    if not current_user_id:
         raise HTTPException(status_code=403, detail="Unauthenticated request")
-    if hasattr(payload, 'amount') and payload.amount <= 0:
+    if hasattr(payload, 'amount') and (not math.isfinite(payload.amount) or payload.amount <= 0):
         raise HTTPException(status_code=400, detail="Amount must be greater than zero")
 
     group = db.query(models.Group).filter(models.Group.id == payload.group_id).first()
@@ -153,16 +302,23 @@ def validate_ledger_payload(payload: Any, db: Session, x_user_id: str):
         raise HTTPException(status_code=404, detail="Group not found")
 
     member_ids = {m.id for m in group.members}
-    if x_user_id not in member_ids:
+    if current_user_id not in member_ids:
         raise HTTPException(status_code=403, detail="You must be a member of this group to modify the ledger")
         
     if payload.payer_id not in member_ids:
         raise HTTPException(status_code=400, detail="Payer is not in the group")
 
+    if not payload.splits:
+        raise HTTPException(status_code=400, detail="At least one split is required")
+
+    split_user_ids = [split.user_id for split in payload.splits]
+    if len(split_user_ids) != len(set(split_user_ids)):
+        raise HTTPException(status_code=400, detail="Each user can only appear once in splits")
+
     for split in payload.splits:
         if split.user_id not in member_ids:
             raise HTTPException(status_code=400, detail=f"User {split.user_id} is not in the group")
-        if split.amount_owed < 0:
+        if not math.isfinite(split.amount_owed) or split.amount_owed < 0:
             raise HTTPException(status_code=400, detail="Split amounts cannot be negative")
 
     total_split = sum(split.amount_owed for split in payload.splits)
@@ -213,7 +369,8 @@ def process_due_recurring_expenses(group_id: str, db: Session) -> int:
     ).all()
 
     for template in templates:
-        while template.next_run_on <= today:
+        generated_for_template = 0
+        while template.next_run_on <= today and generated_for_template < MAX_RECURRING_GENERATIONS_PER_TEMPLATE:
             month_key = template.next_run_on.strftime("%Y-%m")
             existing = db.query(models.Expense).filter(
                 models.Expense.recurring_template_id == template.id,
@@ -236,6 +393,7 @@ def process_due_recurring_expenses(group_id: str, db: Session) -> int:
                     generated_for_month=month_key,
                 )
                 generated_count += 1
+                generated_for_template += 1
 
             template.next_run_on = next_monthly_run(template.next_run_on, template.day_of_month)
 
@@ -256,6 +414,9 @@ class OTPVerify(BaseModel):
     code: str
     name: Optional[str] = None
 
+OTP_REQUEST_RATE_LIMIT: dict[str, list[datetime]] = {}
+OTP_VERIFY_RATE_LIMIT: dict[str, list[datetime]] = {}
+
 def send_email(to_email: str, subject: str, html_content: str):
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASSWORD")
@@ -267,7 +428,7 @@ def send_email(to_email: str, subject: str, html_content: str):
         print(f"--- EMAIL MOCK ---")
         print(f"To: {to_email}")
         print(f"Subject: {subject}")
-        print(f"Content: {html_content}")
+        print("Email content suppressed because SMTP is not configured.")
         print(f"------------------")
         return
 
@@ -287,20 +448,35 @@ def send_email(to_email: str, subject: str, html_content: str):
         print(f"Failed to send email: {e}")
 
 @app.post("/users/request-otp")
-def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
+def request_otp(payload: OTPRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.lower().strip()
     if not email:
         raise HTTPException(400, "Email required")
+
+    now = datetime.utcnow()
+    request_key = f"{email}:{request.client.host if request.client else 'unknown'}"
+    history = prune_timestamps(
+        OTP_REQUEST_RATE_LIMIT.get(request_key, []),
+        now,
+        OTP_REQUEST_WINDOW_SECONDS,
+    )
+    if history and (now - history[-1]).total_seconds() < OTP_REQUEST_COOLDOWN_SECONDS:
+        raise HTTPException(status_code=429, detail="Please wait before requesting another code")
+    if len(history) >= OTP_REQUEST_MAX_PER_WINDOW:
+        raise HTTPException(status_code=429, detail="Too many verification code requests")
+    history.append(now)
+    OTP_REQUEST_RATE_LIMIT[request_key] = history
     
-    code = f"{random.randint(100000, 999999)}"
-    expires_at = datetime.utcnow() + timedelta(minutes=10)
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = now + timedelta(minutes=10)
+    hashed_code = hash_otp(email, code)
     
     otp_record = db.query(models.UserOTP).filter(models.UserOTP.email == email).first()
     if otp_record:
-        otp_record.otp_code = code
+        otp_record.otp_code = hashed_code
         otp_record.expires_at = expires_at
     else:
-        otp_record = models.UserOTP(email=email, otp_code=code, expires_at=expires_at)
+        otp_record = models.UserOTP(email=email, otp_code=hashed_code, expires_at=expires_at)
         db.add(otp_record)
         
     db.commit()
@@ -363,9 +539,20 @@ def request_otp(payload: OTPRequest, db: Session = Depends(get_db)):
 def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
     email = payload.email.lower().strip()
     code = payload.code.strip()
+    now = datetime.utcnow()
     
     # Check for local development bypass
     is_dev = os.getenv("IS_LOCAL_DEV") == "true"
+    if not is_dev:
+        history = prune_timestamps(
+            OTP_VERIFY_RATE_LIMIT.get(email, []),
+            now,
+            OTP_VERIFY_WINDOW_SECONDS,
+        )
+        if len(history) >= OTP_VERIFY_MAX_PER_WINDOW:
+            raise HTTPException(429, "Too many verification attempts. Please request a new code.")
+        history.append(now)
+        OTP_VERIFY_RATE_LIMIT[email] = history
     
     otp_record = db.query(models.UserOTP).filter(models.UserOTP.email == email).first()
     
@@ -373,10 +560,17 @@ def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
         # Master bypass for dev
         pass
     else:
-        if not otp_record or otp_record.otp_code != code:
+        hashed_code = hash_otp(email, code)
+        otp_matches = bool(
+            otp_record and (
+                hmac.compare_digest(otp_record.otp_code, hashed_code)
+                or hmac.compare_digest(otp_record.otp_code, code)
+            )
+        )
+        if not otp_matches:
             raise HTTPException(401, "Invalid or expired verification code")
             
-        if otp_record.expires_at < datetime.utcnow():
+        if otp_record.expires_at < now:
             raise HTTPException(401, "Verification code has expired")
         
 
@@ -390,10 +584,12 @@ def verify_otp(payload: OTPVerify, db: Session = Depends(get_db)):
         db.refresh(user)
         
     # Clear OTP
-    db.delete(otp_record)
+    if otp_record:
+        db.delete(otp_record)
+    OTP_VERIFY_RATE_LIMIT.pop(email, None)
     db.commit()
     
-    return {"id": user.id, "name": user.name}
+    return auth_user_response(user)
 
 @app.post("/users/google-login")
 def google_login(payload: GoogleLoginPayload, db: Session = Depends(get_db)):
@@ -404,6 +600,8 @@ def google_login(payload: GoogleLoginPayload, db: Session = Depends(get_db)):
     try:
         idinfo = id_token.verify_oauth2_token(payload.credential, google_requests.Request(), client_id)
         email = idinfo['email'].lower()
+        if not idinfo.get("email_verified", False):
+            raise HTTPException(401, "Google account email is not verified")
         name = idinfo.get('name', email.split('@')[0])
         
         user = db.query(models.User).filter(models.User.email == email).first()
@@ -413,34 +611,57 @@ def google_login(payload: GoogleLoginPayload, db: Session = Depends(get_db)):
             db.commit()
             db.refresh(user)
             
-        return {"id": user.id, "name": user.name}
+        return auth_user_response(user)
     except ValueError:
         raise HTTPException(401, "Invalid Google token")
 
 @app.post("/users/")
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(models.User.email == user.email).first()
+def create_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    _ = current_user
+    email = user.email.lower().strip()
+    if not email:
+        raise HTTPException(400, "Email required")
+
+    existing_user = db.query(models.User).filter(models.User.email == email).first()
     if existing_user:
         return {"id": existing_user.id, "name": existing_user.name}
 
-    db_user = models.User(name=user.name, email=user.email)
+    db_user = models.User(name=user.name.strip() or email.split('@')[0].capitalize(), email=email)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     return {"id": db_user.id, "name": db_user.name}
 
 @app.put("/users/{user_id}")
-def update_user(user_id: str, user_update: UserUpdate, db: Session = Depends(get_db)):
+def update_user(
+    user_id: str,
+    user_update: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    if current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="You can only update your own profile")
+
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
-    user.name = user_update.name
+    user.name = user_update.name.strip()
+    if not user.name:
+        raise HTTPException(status_code=400, detail="Name is required")
     db.commit()
     db.refresh(user)
-    return {"id": user.id, "name": user.name}
+    return auth_user_response(user)
 
 @app.post("/groups/")
-def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def create_group(
+    group: GroupCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     import re
     import uuid
     # Generate friendly slug
@@ -450,37 +671,40 @@ def create_group(group: GroupCreate, x_user_id: Optional[str] = Header(None), db
         slug = "group"
     group_id = f"{slug}-{uuid.uuid4().hex[:6]}"
     
-    db_group = models.Group(id=group_id, name=group.name, creator_id=x_user_id)
+    db_group = models.Group(id=group_id, name=group.name, creator_id=current_user.id)
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
     
-    # If the creator exists, automatically add them as a member
-    if x_user_id:
-        user = db.query(models.User).filter(models.User.id == x_user_id).first()
-        if user:
-            db_group.members.append(user)
-            db.commit()
+    db_group.members.append(current_user)
+    db.commit()
             
     return {"id": db_group.id, "name": db_group.name}
 
 @app.get("/groups/")
-def get_all_groups(x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def get_all_groups(
+    current_user: Optional[models.User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
     """Fetches all existing groups that the user is a part of."""
-    if not x_user_id:
+    if not current_user:
         return []
         
     groups = db.query(models.Group).all()
     user_groups = []
     
     for g in groups:
-        is_member = any(m.id == x_user_id for m in g.members)
+        is_member = any(m.id == current_user.id for m in g.members)
         if is_member:
             user_groups.append({"id": g.id, "name": g.name, "currency": g.currency})
             
     return user_groups
 
-def require_group_access(group_id: str, x_user_id: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def require_group_access(
+    group_id: str,
+    current_user: Optional[models.User] = Depends(get_optional_current_user),
+    db: Session = Depends(get_db),
+):
     group = db.query(models.Group).filter(models.Group.id == group_id).first()
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -488,11 +712,11 @@ def require_group_access(group_id: str, x_user_id: Optional[str] = Header(None),
     if group.creator_id is None:
         return group
         
-    if not x_user_id:
+    if not current_user:
         raise HTTPException(status_code=403, detail="Access Denied: Please identify yourself to view this group.")
         
     member_ids = [m.id for m in group.members]
-    if x_user_id in member_ids:
+    if current_user.id in member_ids:
         return group
         
     raise HTTPException(status_code=403, detail="Access Denied: You are not a member of this private group.")
@@ -515,12 +739,16 @@ def get_group_details(group_id: str, db: Session = Depends(get_db), _ = Depends(
 INVITE_RATE_LIMIT = {}
 
 @app.post("/groups/{group_id}/members")
-def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depends(get_db), _ = Depends(require_group_access)):
-    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+def add_user_to_group(
+    group_id: str,
+    payload: GroupMemberAdd,
+    db: Session = Depends(get_db),
+    group: models.Group = Depends(require_group_member),
+):
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     
-    if not group or not user:
-        raise HTTPException(status_code=404, detail="Group or User not found")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
         
     if user not in group.members:
         group.members.append(user)
@@ -543,12 +771,16 @@ def add_user_to_group(group_id: str, payload: GroupMemberAdd, db: Session = Depe
     return {"message": f"Added {user.name} to {group.name}"}
 
 @app.delete("/groups/{group_id}/members/{user_id}")
-def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
-    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+def remove_user_from_group(
+    group_id: str,
+    user_id: str,
+    db: Session = Depends(get_db),
+    group: models.Group = Depends(require_group_member),
+):
     user = db.query(models.User).filter(models.User.id == user_id).first()
     
-    if not group or not user:
-        raise HTTPException(status_code=404, detail="Group or User not found")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
         
     if user not in group.members:
         raise HTTPException(status_code=400, detail="User is not a member of this group")
@@ -557,7 +789,7 @@ def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(ge
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
     settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
     
-    balance = 0.0
+    balance = Decimal("0.00")
     for ex in expenses:
         if ex.payer_id == user_id:
             balance += ex.amount
@@ -571,7 +803,7 @@ def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(ge
         if st.receiver_id == user_id:
             balance -= st.amount
             
-    if abs(balance) > 0.01:
+    if abs(balance) > Decimal("0.01"):
         raise HTTPException(status_code=400, detail="Cannot leave group with an unsettled balance. Please settle up first.")
         
     group.members.remove(user)
@@ -586,11 +818,11 @@ def remove_user_from_group(group_id: str, user_id: str, db: Session = Depends(ge
     return {"message": f"Removed {user.name} from {group.name}"}
 
 @app.delete("/groups/{group_id}")
-def delete_group(group_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
-    group = db.query(models.Group).filter(models.Group.id == group_id).first()
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-
+def delete_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    group: models.Group = Depends(require_group_member),
+):
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
     settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
     
@@ -616,8 +848,12 @@ def delete_group(group_id: str, db: Session = Depends(get_db), x_user_id: Option
 
 # API Endpoints: The Ledger (Expenses & Settlements)
 @app.post("/expenses/")
-def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
-    validate_ledger_payload(expense, db, x_user_id)
+def create_expense(
+    expense: ExpenseCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    validate_ledger_payload(expense, db, current_user.id)
     db_expense = create_expense_rows(
         db,
         group_id=expense.group_id,
@@ -625,13 +861,18 @@ def create_expense(expense: ExpenseCreate, db: Session = Depends(get_db), x_user
         description=expense.description,
         amount=expense.amount,
         splits=expense.splits,
-        creator_id=x_user_id,
+        creator_id=current_user.id,
     )
     db.commit()
     return {"message": "Expense recorded", "expense_id": db_expense.id}
 
 @app.post("/expenses/{expense_id}/receipt")
-def upload_receipt(expense_id: str, receipt: UploadFile = File(...), db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
+def upload_receipt(
+    expense_id: str,
+    receipt: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     expense = db.query(models.Expense).filter(
         models.Expense.id == expense_id,
         models.Expense.is_deleted == False,
@@ -640,31 +881,88 @@ def upload_receipt(expense_id: str, receipt: UploadFile = File(...), db: Session
         raise HTTPException(status_code=404, detail="Expense not found")
         
     group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
-    if not group or x_user_id not in [m.id for m in group.members]:
+    if not group or current_user.id not in [m.id for m in group.members]:
         raise HTTPException(status_code=403, detail="Unauthorized")
-        
-    if not receipt.content_type or not receipt.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Receipt must be an image")
 
-    suffix = Path(receipt.filename or "").suffix.lower() or ".jpg"
-    filename = f"{expense_id}{suffix}"
+    first_chunk = receipt.file.read(min(8192, MAX_RECEIPT_BYTES + 1))
+    detected_type = detect_image_type(first_chunk)
+    if not detected_type:
+        raise HTTPException(status_code=400, detail="Receipt must be a JPEG, PNG, WebP, or GIF image")
+
+    suffix = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }[detected_type]
+    filename = f"{expense_id}-{secrets.token_urlsafe(12)}{suffix}"
     destination = RECEIPT_DIR / filename
     with destination.open("wb") as buffer:
-        buffer.write(receipt.file.read())
+        total_bytes = len(first_chunk)
+        if total_bytes > MAX_RECEIPT_BYTES:
+            destination.unlink(missing_ok=True)
+            raise HTTPException(status_code=413, detail="Receipt image is too large")
+        buffer.write(first_chunk)
 
-    expense.receipt_filename = receipt.filename
+        while True:
+            chunk = receipt.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > MAX_RECEIPT_BYTES:
+                destination.unlink(missing_ok=True)
+                raise HTTPException(status_code=413, detail="Receipt image is too large")
+            buffer.write(chunk)
+
+    original_filename = Path(receipt.filename or filename).name[:255]
+    expense.receipt_filename = original_filename
     expense.receipt_url = f"/uploads/receipts/{filename}"
     db.commit()
-    return {"message": "Receipt uploaded", "receipt_url": expense.receipt_url}
+    return {"message": "Receipt uploaded", "receipt_url": f"/expenses/{expense_id}/receipt"}
+
+@app.get("/expenses/{expense_id}/receipt")
+def get_receipt(
+    expense_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    expense = db.query(models.Expense).filter(
+        models.Expense.id == expense_id,
+        models.Expense.is_deleted == False,
+    ).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
+    if not group or current_user.id not in [m.id for m in group.members]:
+        raise HTTPException(status_code=403, detail="Unauthorized")
+
+    path = receipt_file_path(expense)
+    download_name = expense.receipt_filename or path.name
+    return FileResponse(
+        path=str(path),
+        media_type=media_type_for_filename(path.name),
+        filename=download_name,
+    )
 
 @app.post("/recurring-expenses/")
-def create_recurring_expense(template: RecurringExpenseCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
-    validate_ledger_payload(template, db, x_user_id)
+def create_recurring_expense(
+    template: RecurringExpenseCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    validate_ledger_payload(template, db, current_user.id)
 
     start = template.start_date or date.today()
     day_of_month = template.day_of_month or start.day
     if day_of_month < 1 or day_of_month > 31:
         raise HTTPException(status_code=400, detail="day_of_month must be between 1 and 31")
+    first_run = first_monthly_run(start, day_of_month)
+    if estimated_monthly_runs(first_run, date.today()) > MAX_RECURRING_BACKFILL_MONTHS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Recurring expenses can backfill at most {MAX_RECURRING_BACKFILL_MONTHS} months",
+        )
 
     db_template = models.RecurringExpenseTemplate(
         group_id=template.group_id,
@@ -672,7 +970,7 @@ def create_recurring_expense(template: RecurringExpenseCreate, db: Session = Dep
         description=template.description,
         amount=template.amount,
         day_of_month=day_of_month,
-        next_run_on=first_monthly_run(start, day_of_month),
+        next_run_on=first_run,
     )
     db.add(db_template)
     db.flush()
@@ -721,22 +1019,26 @@ def get_group_recurring_expenses(group_id: str, db: Session = Depends(get_db), _
     }
 
 @app.delete("/expenses/{expense_id}")
-def delete_expense(expense_id: str, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
+def delete_expense(
+    expense_id: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     expense = db.query(models.Expense).filter(models.Expense.id == expense_id).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Expense not found")
         
     group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
-    if not group or x_user_id not in [m.id for m in group.members]:
+    if not group or current_user.id not in [m.id for m in group.members]:
         raise HTTPException(status_code=403, detail="Unauthorized")
         
     # Check if the user is the creator (or payer for grandfathered expenses)
     if expense.creator_id:
-        if expense.creator_id != x_user_id:
+        if expense.creator_id != current_user.id:
             raise HTTPException(status_code=403, detail="Only the person who created this expense can delete it")
     else:
         # Fallback for old expenses before creator_id was added
-        if expense.payer_id != x_user_id:
+        if expense.payer_id != current_user.id:
             raise HTTPException(status_code=403, detail="Only the person who created this expense can delete it")
             
     # Lock the expense if a settlement has occurred since it was created
@@ -754,11 +1056,12 @@ def delete_expense(expense_id: str, db: Session = Depends(get_db), x_user_id: Op
     return {"message": "Expense deleted"}
 
 @app.post("/settlements/")
-def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db), x_user_id: Optional[str] = Header(None)):
+def create_settlement(
+    settlement: SettlementCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     """Records a payment between two users to clear debt."""
-    if not x_user_id:
-        raise HTTPException(status_code=403, detail="Unauthenticated")
-        
     if settlement.payer_id == settlement.receiver_id:
         raise HTTPException(status_code=400, detail="Payer and receiver cannot be the same")
     if settlement.amount <= 0:
@@ -769,10 +1072,10 @@ def create_settlement(settlement: SettlementCreate, db: Session = Depends(get_db
         raise HTTPException(status_code=404, detail="Group not found")
         
     member_ids = {m.id for m in group.members}
-    if x_user_id not in member_ids:
+    if current_user.id not in member_ids:
         raise HTTPException(status_code=403, detail="Unauthorized to settle in this group")
         
-    if x_user_id != settlement.payer_id and x_user_id != settlement.receiver_id:
+    if current_user.id != settlement.payer_id and current_user.id != settlement.receiver_id:
         raise HTTPException(status_code=403, detail="You can only settle your own debts")
     if settlement.payer_id not in member_ids or settlement.receiver_id not in member_ids:
         raise HTTPException(status_code=400, detail="Both settlement users must be in the group")
@@ -813,7 +1116,7 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
             "payer_id": e.payer_id,
             "payer_name": user_names.get(e.payer_id, "Unknown"),
             "creator_id": e.creator_id,
-            "receipt_url": e.receipt_url,
+            "receipt_url": f"/expenses/{e.id}/receipt" if e.receipt_url else None,
             "receipt_filename": e.receipt_filename,
             "recurring_template_id": e.recurring_template_id,
             "generated_for_month": e.generated_for_month,
@@ -902,7 +1205,7 @@ def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(r
             "amount": float(expense.amount),
             "payer": user_names.get(expense.payer_id, "Unknown"),
             "receiver": "",
-            "receipt_url": expense.receipt_url or "",
+            "receipt_url": f"/expenses/{expense.id}/receipt" if expense.receipt_url else "",
             "recurring_month": expense.generated_for_month or "",
         })
     for settlement in settlements:

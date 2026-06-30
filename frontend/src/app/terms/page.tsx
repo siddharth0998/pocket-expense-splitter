@@ -36,7 +36,7 @@ export default function TermsOfService() {
 
           <section>
             <h2 className="text-2xl font-bold mb-3">3. Disclaimer of Warranties</h2>
-            <p>The service is provided on an "AS IS" and "AS AVAILABLE" basis. We make no warranties, expressed or implied, regarding the accuracy of calculations or availability of the service.</p>
+            <p>The service is provided on an &quot;AS IS&quot; and &quot;AS AVAILABLE&quot; basis. We make no warranties, expressed or implied, regarding the accuracy of calculations or availability of the service.</p>
           </section>
 
           <section>
@@ -46,7 +46,7 @@ export default function TermsOfService() {
 
           <section>
             <h2 className="text-2xl font-bold mb-3">5. Changes to Terms</h2>
-            <p>We reserve the right to modify or replace these Terms at any time. We will try to provide at least 30 days' notice prior to any new terms taking effect.</p>
+            <p>We reserve the right to modify or replace these Terms at any time. We will try to provide at least 30 days&apos; notice prior to any new terms taking effect.</p>
           </section>
         </div>
 

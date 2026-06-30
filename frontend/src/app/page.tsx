@@ -5,7 +5,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { api } from "@/lib/api";
+import Script from "next/script";
+import { AUTH_TOKEN_STORAGE_KEY, api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,89 +26,7 @@ type GroupSummary = {
   currency: string;
 };
 
-const structuredData = {
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "Organization",
-      "@id": "https://splitvero.com/#organization",
-      name: "Splitvero",
-      url: "https://splitvero.com",
-      logo: "https://splitvero.com/logo.png",
-    },
-    {
-      "@type": "WebApplication",
-      "@id": "https://splitvero.com/#webapp",
-      name: "Splitvero",
-      url: "https://splitvero.com",
-      applicationCategory: "FinanceApplication",
-      operatingSystem: "Web",
-      description:
-        "A free expense splitter for friends, roommates, and travel groups to split bills, track shared expenses, upload receipts, and settle up.",
-      creator: {
-        "@id": "https://splitvero.com/#organization",
-      },
-      offers: {
-        "@type": "Offer",
-        price: "0",
-        priceCurrency: "USD",
-      },
-      featureList: [
-        "Equal and exact expense splits",
-        "Recurring monthly expenses",
-        "Receipt uploads",
-        "Minimized settle-up payments",
-        "CSV export",
-      ],
-    },
-    {
-      "@type": "FAQPage",
-      "@id": "https://splitvero.com/#faq",
-      mainEntity: [
-        {
-          "@type": "Question",
-          name: "Is Splitvero free to use?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Yes, Splitvero is free to use with no hidden fees or premium tiers.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "How are settlements calculated?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Splitvero uses a min-cash-flow algorithm to reduce the total number of transactions between group members.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Do my friends need to create accounts?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Friends can log in using a secure one-time passcode or Google Sign-In to view the group and add expenses.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Can I split expenses unequally?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Yes. You can switch from equal splits to exact splits and manually assign who owes what.",
-          },
-        },
-        {
-          "@type": "Question",
-          name: "Who is the admin of the group?",
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: "Splitvero uses a high trust model where anyone in the group can add members, record expenses, or remove members when debts are settled.",
-          },
-        },
-      ],
-    },
-  ],
-};
+
 
 export default function Home() {
   const router = useRouter();
@@ -116,6 +35,12 @@ export default function Home() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(false);
   const [userName, setUserName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
+      setUserName(localStorage.getItem("splitvero_user_name"));
+    }
+  }, []);
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState("");
   const [isSavingName, setIsSavingName] = useState(false);
@@ -133,8 +58,13 @@ export default function Home() {
   };
 
   useEffect(() => {
-    setUserName(localStorage.getItem("splitvero_user_name"));
-    fetchGroups();
+    if (!localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
+      localStorage.removeItem("splitvero_user_id");
+      localStorage.removeItem("splitvero_user_name");
+    }
+    queueMicrotask(() => {
+      void fetchGroups();
+    });
   }, []);
 
   // Handle clicking outside of the profile menu to close it
@@ -153,6 +83,7 @@ export default function Home() {
   const handleLogout = () => {
     localStorage.removeItem("splitvero_user_id");
     localStorage.removeItem("splitvero_user_name");
+    localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
     setUserName(null);
     setGroups([]);
     setIsProfileMenuOpen(false);
@@ -165,8 +96,11 @@ export default function Home() {
 
     try {
       setIsSavingName(true);
-      await api.updateUser(userId, editNameValue.trim());
+      const updatedUser = await api.updateUser(userId, editNameValue.trim());
       localStorage.setItem("splitvero_user_name", editNameValue.trim());
+      if (updatedUser?.token) {
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, updatedUser.token);
+      }
       setUserName(editNameValue.trim());
       setIsEditingName(false);
     } catch (error) {
@@ -182,7 +116,7 @@ export default function Home() {
     if (!groupName.trim()) return;
 
     // Check identity before creating group
-    if (!localStorage.getItem("splitvero_user_id")) {
+    if (!localStorage.getItem(AUTH_TOKEN_STORAGE_KEY)) {
       setPendingAction("create");
       setIsWelcomeModalOpen(true);
       return;
@@ -209,12 +143,6 @@ export default function Home() {
 
   return (
     <>
-    <script
-      type="application/ld+json"
-      dangerouslySetInnerHTML={{
-        __html: JSON.stringify(structuredData).replace(/</g, "\\u003c"),
-      }}
-    />
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden transition-colors duration-300">
 
       {/* HEADER */}
@@ -419,7 +347,7 @@ export default function Home() {
                   <Download className="w-6 h-6" />
                 </div>
                 <h3 className="text-xl font-bold text-foreground">Export to CSV</h3>
-                <p className="text-muted-foreground text-sm">Download your entire group's activity ledger into a spreadsheet for personal bookkeeping.</p>
+                <p className="text-muted-foreground text-sm">Download your entire group&apos;s activity ledger into a spreadsheet for personal bookkeeping.</p>
               </CardContent>
             </Card>
           </div>
@@ -453,13 +381,13 @@ export default function Home() {
           <AccordionItem value="item-4">
             <AccordionTrigger className="text-left text-lg">Can I split expenses unequally?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
-              Absolutely. When adding an expense, you can switch from "Equal" to "Exact" splits and manually assign who owes what.
+              Absolutely. When adding an expense, you can switch from &quot;Equal&quot; to &quot;Exact&quot; splits and manually assign who owes what.
             </AccordionContent>
           </AccordionItem>
           <AccordionItem value="item-5">
             <AccordionTrigger className="text-left text-lg">Who is the admin of the group?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
-              Splitvero operates on a "high trust" model. There are no strict admins—anyone in the group can add members, record expenses, or remove members (as long as all debts are settled!).
+              Splitvero operates on a &quot;high trust&quot; model. There are no strict admins; anyone in the group can add members, record expenses, or remove members (as long as all debts are settled!).
             </AccordionContent>
           </AccordionItem>
         </Accordion>
