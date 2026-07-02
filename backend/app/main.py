@@ -25,7 +25,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
 # Import the files we just wrote
-from . import models, algorithm
+from . import models, algorithm, currency
 
 # Database Setup
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@db:5432/splitvero")
@@ -48,22 +48,78 @@ def ensure_schema_compatibility():
         "recurring_template_id": "VARCHAR",
         "generated_for_month": "VARCHAR",
         "creator_id": "VARCHAR",
+        # --- Multi-currency fields ---
+        "original_amount": "NUMERIC(12, 2)",
+        "original_currency": "VARCHAR(3)",
+        "exchange_rate": "NUMERIC(18, 8)",
+        "converted_amount": "NUMERIC(12, 2)",
+        "is_custom_rate": "BOOLEAN DEFAULT FALSE",
     }
     missing_columns = [name for name in column_sql if name not in existing_columns]
-    
+
     group_columns = {column["name"] for column in inspector.get_columns("groups")}
     missing_group_columns = ["creator_id"] if "creator_id" not in group_columns else []
+
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    missing_user_columns = ["base_currency"] if "base_currency" not in user_columns else []
+
+    recurring_missing = []
+    if "recurring_expense_templates" in inspector.get_table_names():
+        recurring_columns = {column["name"] for column in inspector.get_columns("recurring_expense_templates")}
+        recurring_sql = {
+            "original_amount": "NUMERIC(12, 2)",
+            "original_currency": "VARCHAR(3)",
+            "exchange_rate": "NUMERIC(18, 8)",
+            "converted_amount": "NUMERIC(12, 2)",
+            "is_custom_rate": "BOOLEAN DEFAULT FALSE",
+        }
+        recurring_missing = [(name, sql) for name, sql in recurring_sql.items() if name not in recurring_columns]
 
     with engine.begin() as connection:
         for column_name in missing_columns:
             connection.execute(text(f"ALTER TABLE expenses ADD COLUMN {column_name} {column_sql[column_name]}"))
         for column_name in missing_group_columns:
             connection.execute(text(f"ALTER TABLE groups ADD COLUMN creator_id VARCHAR"))
+        for column_name in missing_user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN base_currency VARCHAR(3) DEFAULT 'USD'"))
+        for column_name, column_type in recurring_missing:
+            connection.execute(text(f"ALTER TABLE recurring_expense_templates ADD COLUMN {column_name} {column_type}"))
         connection.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_recurring_expense_month "
             "ON expenses (recurring_template_id, generated_for_month) "
             "WHERE recurring_template_id IS NOT NULL AND generated_for_month IS NOT NULL"
         ))
+
+        # Backfill multi-currency fields for legacy rows so summaries stay valid.
+        # Existing amounts are treated as already in the group's base currency (rate = 1).
+        if "original_amount" in missing_columns:
+            connection.execute(text(
+                "UPDATE expenses SET "
+                "original_amount = amount, "
+                "converted_amount = amount, "
+                "exchange_rate = 1, "
+                "is_custom_rate = FALSE "
+                "WHERE original_amount IS NULL"
+            ))
+            connection.execute(text(
+                "UPDATE expenses SET original_currency = ("
+                "  SELECT COALESCE(groups.currency, 'USD') FROM groups WHERE groups.id = expenses.group_id"
+                ") WHERE original_currency IS NULL"
+            ))
+        if recurring_missing and any(name == "original_amount" for name, _ in recurring_missing):
+            connection.execute(text(
+                "UPDATE recurring_expense_templates SET "
+                "original_amount = amount, "
+                "converted_amount = amount, "
+                "exchange_rate = 1, "
+                "is_custom_rate = FALSE "
+                "WHERE original_amount IS NULL"
+            ))
+            connection.execute(text(
+                "UPDATE recurring_expense_templates SET original_currency = ("
+                "  SELECT COALESCE(groups.currency, 'USD') FROM groups WHERE groups.id = recurring_expense_templates.group_id"
+                ") WHERE original_currency IS NULL"
+            ))
 
 ensure_schema_compatibility()
 
@@ -174,7 +230,12 @@ def get_current_user(current_user: Optional[models.User] = Depends(get_optional_
     return current_user
 
 def auth_user_response(user: models.User):
-    return {"id": user.id, "name": user.name, "token": create_auth_token(user)}
+    return {
+        "id": user.id,
+        "name": user.name,
+        "token": create_auth_token(user),
+        "base_currency": getattr(user, "base_currency", None) or currency.DEFAULT_CURRENCY,
+    }
 
 def hash_otp(email: str, code: str) -> str:
     return hmac.new(AUTH_SECRET.encode("utf-8"), f"{email}:{code}".encode("utf-8"), hashlib.sha256).hexdigest()
@@ -204,10 +265,15 @@ class UserCreate(BaseModel):
     email: str
 
 class UserUpdate(BaseModel):
-    name: str
+    name: Optional[str] = None
+    base_currency: Optional[str] = None
 
 class GroupCreate(BaseModel):
     name: str
+    currency: Optional[str] = None
+
+class GroupCurrencyUpdate(BaseModel):
+    currency: str
 
 class GroupMemberAdd(BaseModel):
     user_id: str
@@ -220,8 +286,14 @@ class ExpenseCreate(BaseModel):
     group_id: str
     payer_id: str
     description: str
-    amount: float
+    amount: float  # Group-base-currency total. Splits must sum to this.
     splits: List[SplitCreate]
+    # --- Multi-currency (optional; legacy clients omit these) ---
+    original_amount: Optional[float] = None
+    original_currency: Optional[str] = None
+    exchange_rate: Optional[float] = None
+    converted_amount: Optional[float] = None
+    is_custom_rate: Optional[bool] = False
 
 class RecurringExpenseCreate(ExpenseCreate):
     start_date: Optional[date] = None
@@ -338,6 +410,11 @@ def create_expense_rows(
     creator_id: Optional[str] = None,
     recurring_template_id: Optional[str] = None,
     generated_for_month: Optional[str] = None,
+    original_amount: Optional[float] = None,
+    original_currency: Optional[str] = None,
+    exchange_rate: Optional[float] = None,
+    converted_amount: Optional[float] = None,
+    is_custom_rate: bool = False,
 ) -> models.Expense:
     db_expense = models.Expense(
         group_id=group_id,
@@ -347,6 +424,11 @@ def create_expense_rows(
         amount=amount,
         recurring_template_id=recurring_template_id,
         generated_for_month=generated_for_month,
+        original_amount=original_amount if original_amount is not None else amount,
+        original_currency=original_currency,
+        exchange_rate=exchange_rate if exchange_rate is not None else 1,
+        converted_amount=converted_amount if converted_amount is not None else amount,
+        is_custom_rate=bool(is_custom_rate),
     )
     db.add(db_expense)
     db.flush()
@@ -360,9 +442,137 @@ def create_expense_rows(
 
     return db_expense
 
+
+def resolve_conversion(payload: "ExpenseCreate", base_currency: str) -> dict:
+    """
+    Determine the canonical multi-currency fields for an expense, all expressed
+    against the group's base currency. Trusts the client's snapshot (rate + converted
+    amount) so the stored splits stay consistent with what the user saw; falls back to
+    a live rate when the client didn't supply one.
+    """
+    base = currency.normalize(base_currency)
+    orig_ccy = currency.normalize(payload.original_currency, fallback=base)
+    orig_amt = Decimal(str(payload.original_amount if payload.original_amount is not None else payload.amount))
+
+    if orig_ccy == base:
+        return {
+            "original_amount": currency.quantize_money(orig_amt),
+            "original_currency": base,
+            "exchange_rate": Decimal("1"),
+            "converted_amount": currency.quantize_money(orig_amt),
+            "is_custom_rate": False,
+        }
+
+    is_custom = bool(payload.is_custom_rate)
+    if payload.converted_amount is not None and payload.exchange_rate is not None:
+        converted = currency.quantize_money(Decimal(str(payload.converted_amount)))
+        rate = currency.quantize_rate(Decimal(str(payload.exchange_rate)))
+    else:
+        # Client didn't send a snapshot; fetch a live rate.
+        rate = currency.get_rate(orig_ccy, base)
+        converted = currency.quantize_money(orig_amt * rate)
+        is_custom = False
+
+    return {
+        "original_amount": currency.quantize_money(orig_amt),
+        "original_currency": orig_ccy,
+        "exchange_rate": rate,
+        "converted_amount": converted,
+        "is_custom_rate": is_custom,
+    }
+
+
+def rescale_splits(splits: list, old_total: Decimal, new_total: Decimal) -> None:
+    """
+    Proportionally rescale a list of split rows so their amount_owed sums exactly to
+    new_total, fixing any rounding residue on the largest split. Mutates rows in place.
+    """
+    if not splits:
+        return
+    old_total = Decimal(old_total)
+    new_total = currency.quantize_money(Decimal(new_total))
+    if old_total == 0:
+        # Split evenly if we can't scale from a zero base.
+        share = currency.quantize_money(new_total / len(splits))
+        running = Decimal("0.00")
+        for split in splits:
+            split.amount_owed = share
+            running += share
+    else:
+        running = Decimal("0.00")
+        for split in splits:
+            scaled = currency.quantize_money(Decimal(split.amount_owed) * new_total / old_total)
+            split.amount_owed = scaled
+            running += scaled
+    # Correct rounding drift on the largest split.
+    residue = new_total - running
+    if residue != 0:
+        largest = max(splits, key=lambda s: Decimal(s.amount_owed))
+        largest.amount_owed = currency.quantize_money(Decimal(largest.amount_owed) + residue)
+
+
+def recompute_group_conversions(group: models.Group, new_currency: str, db: Session) -> None:
+    """
+    Option A recompute: when a group's base currency changes, re-express every
+    transaction against the new base using current rates, WITHOUT touching the
+    immutable original_amount/original_currency.
+
+    - Non-custom expenses: fetch a fresh live rate (original_currency -> new base).
+    - Custom-rate expenses: preserve the user's manual conversion by re-expressing the
+      stored converted amount via the old-base -> new-base rate.
+    - Settlements (recorded in base currency) are converted old-base -> new-base.
+    - Splits are proportionally rescaled to the new converted total.
+    May raise currency.CurrencyError if rates are unavailable (caller should rollback).
+    """
+    base_old = currency.normalize(group.currency)
+    base_new = currency.normalize(new_currency)
+    if base_old == base_new:
+        return
+
+    base_to_base = currency.get_rate(base_old, base_new)
+
+    def _reconvert(row):
+        old_converted = Decimal(str(row.converted_amount if row.converted_amount is not None else row.amount))
+        orig_ccy = currency.normalize(row.original_currency, fallback=base_old)
+        orig_amt = Decimal(str(row.original_amount if row.original_amount is not None else row.amount))
+        if row.is_custom_rate:
+            new_converted = currency.quantize_money(old_converted * base_to_base)
+            new_rate = currency.quantize_rate(new_converted / orig_amt) if orig_amt != 0 else Decimal("1")
+        else:
+            new_rate = currency.get_rate(orig_ccy, base_new)
+            new_converted = currency.quantize_money(orig_amt * new_rate)
+        rescale_splits(list(row.splits), old_converted, new_converted)
+        row.exchange_rate = new_rate
+        row.converted_amount = new_converted
+        row.amount = new_converted
+
+    expenses = db.query(models.Expense).filter(
+        models.Expense.group_id == group.id,
+        models.Expense.is_deleted == False,
+    ).all()
+    for expense in expenses:
+        _reconvert(expense)
+
+    settlements = db.query(models.Settlement).filter(
+        models.Settlement.group_id == group.id,
+        models.Settlement.is_deleted == False,
+    ).all()
+    for settlement in settlements:
+        settlement.amount = currency.quantize_money(Decimal(str(settlement.amount)) * base_to_base)
+
+    templates = db.query(models.RecurringExpenseTemplate).filter(
+        models.RecurringExpenseTemplate.group_id == group.id,
+    ).all()
+    for template in templates:
+        _reconvert(template)
+
+    group.currency = base_new
+
 def process_due_recurring_expenses(group_id: str, db: Session) -> int:
     today = date.today()
     generated_count = 0
+    group = db.query(models.Group).filter(models.Group.id == group_id).first()
+    base_currency = currency.normalize(group.currency) if group else currency.DEFAULT_CURRENCY
     templates = db.query(models.RecurringExpenseTemplate).filter(
         models.RecurringExpenseTemplate.group_id == group_id,
         models.RecurringExpenseTemplate.is_active == True,
@@ -370,6 +580,11 @@ def process_due_recurring_expenses(group_id: str, db: Session) -> int:
 
     for template in templates:
         generated_for_template = 0
+        # Base-currency total this template was defined with (matches its stored splits).
+        template_base_total = Decimal(str(template.converted_amount if template.converted_amount is not None else template.amount))
+        orig_currency = currency.normalize(template.original_currency, fallback=base_currency)
+        orig_amount = Decimal(str(template.original_amount if template.original_amount is not None else template.amount))
+
         while template.next_run_on <= today and generated_for_template < MAX_RECURRING_GENERATIONS_PER_TEMPLATE:
             month_key = template.next_run_on.strftime("%Y-%m")
             existing = db.query(models.Expense).filter(
@@ -378,19 +593,41 @@ def process_due_recurring_expenses(group_id: str, db: Session) -> int:
             ).first()
 
             if not existing:
+                # Custom-rate or same-currency templates reuse the stored snapshot.
+                # Otherwise fetch a fresh live rate for this month.
+                if template.is_custom_rate or orig_currency == base_currency:
+                    rate = Decimal(str(template.exchange_rate if template.exchange_rate is not None else 1))
+                    converted = currency.quantize_money(template_base_total)
+                else:
+                    try:
+                        rate = currency.get_rate(orig_currency, base_currency)
+                        converted = currency.quantize_money(orig_amount * rate)
+                    except currency.CurrencyError:
+                        rate = Decimal(str(template.exchange_rate if template.exchange_rate is not None else 1))
+                        converted = currency.quantize_money(template_base_total)
+
                 splits = [
                     SplitCreate(user_id=split.user_id, amount_owed=float(split.amount_owed))
                     for split in template.splits
                 ]
+                # Rescale base-currency splits to this month's converted total if the rate moved.
+                if converted != template_base_total:
+                    rescale_splits(splits, template_base_total, converted)
+
                 create_expense_rows(
                     db,
                     group_id=template.group_id,
                     payer_id=template.payer_id,
                     description=f"{template.description} ({month_key})",
-                    amount=float(template.amount),
+                    amount=float(converted),
                     splits=splits,
                     recurring_template_id=template.id,
                     generated_for_month=month_key,
+                    original_amount=float(orig_amount),
+                    original_currency=orig_currency,
+                    exchange_rate=float(rate),
+                    converted_amount=float(converted),
+                    is_custom_rate=bool(template.is_custom_rate),
                 )
                 generated_count += 1
                 generated_for_template += 1
@@ -649,12 +886,23 @@ def update_user(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(404, "User not found")
-    user.name = user_update.name.strip()
-    if not user.name:
-        raise HTTPException(status_code=400, detail="Name is required")
+
+    if user_update.name is not None:
+        new_name = user_update.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name is required")
+        user.name = new_name
+
+    if user_update.base_currency is not None:
+        if not currency.is_supported(user_update.base_currency):
+            raise HTTPException(status_code=400, detail="Unsupported currency")
+        user.base_currency = currency.normalize(user_update.base_currency)
+
     db.commit()
     db.refresh(user)
-    return auth_user_response(user)
+    response = auth_user_response(user)
+    response["base_currency"] = user.base_currency
+    return response
 
 @app.post("/groups/")
 def create_group(
@@ -670,8 +918,11 @@ def create_group(
     if not slug:
         slug = "group"
     group_id = f"{slug}-{uuid.uuid4().hex[:6]}"
-    
-    db_group = models.Group(id=group_id, name=group.name, creator_id=current_user.id)
+
+    group_currency = currency.normalize(group.currency) if group.currency else (
+        current_user.base_currency or currency.DEFAULT_CURRENCY
+    )
+    db_group = models.Group(id=group_id, name=group.name, currency=group_currency, creator_id=current_user.id)
     db.add(db_group)
     db.commit()
     db.refresh(db_group)
@@ -679,7 +930,7 @@ def create_group(
     db_group.members.append(current_user)
     db.commit()
             
-    return {"id": db_group.id, "name": db_group.name}
+    return {"id": db_group.id, "name": db_group.name, "currency": db_group.currency}
 
 @app.get("/groups/")
 def get_all_groups(
@@ -733,8 +984,53 @@ def get_group_details(group_id: str, db: Session = Depends(get_db), _ = Depends(
         "id": group.id,
         "name": group.name,
         "creator_id": group.creator_id,
+        "currency": currency.normalize(group.currency),
         "members": [{"id": m.id, "name": m.name} for m in group.members]
     }
+
+@app.get("/currencies")
+def list_currencies():
+    """Returns the list of currencies supported by the multi-currency feature."""
+    return {"currencies": [{"code": code, "name": name} for code, name in currency.SUPPORTED_CURRENCIES.items()]}
+
+@app.get("/exchange-rate")
+def get_exchange_rate(base: str, target: str, current_user: models.User = Depends(get_current_user)):
+    """Live rate to convert 1 unit of `base` into `target`."""
+    _ = current_user
+    if not currency.is_supported(base) or not currency.is_supported(target):
+        raise HTTPException(status_code=400, detail="Unsupported currency")
+    try:
+        rate = currency.get_rate(base, target)
+    except currency.CurrencyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {
+        "base": currency.normalize(base),
+        "target": currency.normalize(target),
+        "rate": float(rate),
+    }
+
+@app.put("/groups/{group_id}/currency")
+def change_group_currency(
+    group_id: str,
+    payload: GroupCurrencyUpdate,
+    db: Session = Depends(get_db),
+    group: models.Group = Depends(require_group_member),
+):
+    """Changes the group base currency and recomputes all conversions (Option A)."""
+    if not currency.is_supported(payload.currency):
+        raise HTTPException(status_code=400, detail="Unsupported currency")
+    new_currency = currency.normalize(payload.currency)
+    if new_currency == currency.normalize(group.currency):
+        return {"message": "No change", "currency": new_currency}
+
+    try:
+        recompute_group_conversions(group, new_currency, db)
+    except currency.CurrencyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    db.commit()
+    return {"message": "Group currency updated", "currency": group.currency}
 
 INVITE_RATE_LIMIT = {}
 
@@ -853,15 +1149,32 @@ def create_expense(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    group = db.query(models.Group).filter(models.Group.id == expense.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    try:
+        conversion = resolve_conversion(expense, group.currency)
+    except currency.CurrencyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    # The canonical group-base amount is the converted amount; splits must sum to it.
+    expense.amount = float(conversion["converted_amount"])
     validate_ledger_payload(expense, db, current_user.id)
+
     db_expense = create_expense_rows(
         db,
         group_id=expense.group_id,
         payer_id=expense.payer_id,
         description=expense.description,
-        amount=expense.amount,
+        amount=float(conversion["converted_amount"]),
         splits=expense.splits,
         creator_id=current_user.id,
+        original_amount=float(conversion["original_amount"]),
+        original_currency=conversion["original_currency"],
+        exchange_rate=float(conversion["exchange_rate"]),
+        converted_amount=float(conversion["converted_amount"]),
+        is_custom_rate=conversion["is_custom_rate"],
     )
     db.commit()
     return {"message": "Expense recorded", "expense_id": db_expense.id}
@@ -951,6 +1264,16 @@ def create_recurring_expense(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    group = db.query(models.Group).filter(models.Group.id == template.group_id).first()
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    try:
+        conversion = resolve_conversion(template, group.currency)
+    except currency.CurrencyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    template.amount = float(conversion["converted_amount"])
     validate_ledger_payload(template, db, current_user.id)
 
     start = template.start_date or date.today()
@@ -968,7 +1291,12 @@ def create_recurring_expense(
         group_id=template.group_id,
         payer_id=template.payer_id,
         description=template.description,
-        amount=template.amount,
+        amount=float(conversion["converted_amount"]),
+        original_amount=float(conversion["original_amount"]),
+        original_currency=conversion["original_currency"],
+        exchange_rate=float(conversion["exchange_rate"]),
+        converted_amount=float(conversion["converted_amount"]),
+        is_custom_rate=conversion["is_custom_rate"],
         day_of_month=day_of_month,
         next_run_on=first_run,
     )
@@ -1008,6 +1336,11 @@ def get_group_recurring_expenses(group_id: str, db: Session = Depends(get_db), _
                 "id": template.id,
                 "description": template.description,
                 "amount": float(template.amount),
+                "original_amount": float(template.original_amount) if template.original_amount is not None else float(template.amount),
+                "original_currency": template.original_currency or currency.normalize(group.currency),
+                "converted_amount": float(template.converted_amount) if template.converted_amount is not None else float(template.amount),
+                "exchange_rate": float(template.exchange_rate) if template.exchange_rate is not None else 1.0,
+                "is_custom_rate": bool(template.is_custom_rate),
                 "payer_id": template.payer_id,
                 "payer_name": user_names.get(template.payer_id, "Unknown"),
                 "day_of_month": template.day_of_month,
@@ -1113,6 +1446,11 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
             "id": e.id,
             "description": e.description,
             "amount": float(e.amount),
+            "original_amount": float(e.original_amount) if e.original_amount is not None else float(e.amount),
+            "original_currency": e.original_currency or currency.normalize(group.currency),
+            "converted_amount": float(e.converted_amount) if e.converted_amount is not None else float(e.amount),
+            "exchange_rate": float(e.exchange_rate) if e.exchange_rate is not None else 1.0,
+            "is_custom_rate": bool(e.is_custom_rate),
             "payer_id": e.payer_id,
             "payer_name": user_names.get(e.payer_id, "Unknown"),
             "creator_id": e.creator_id,
@@ -1142,7 +1480,8 @@ def get_group_feed(group_id: str, db: Session = Depends(get_db), _ = Depends(req
 
     # Sort by created_at descending (newest first)
     feed.sort(key=lambda x: x["created_at"], reverse=True)
-    return {"feed": feed}
+    total_spend = sum((Decimal(str(e.amount)) for e in expenses), Decimal("0.00"))
+    return {"feed": feed, "currency": currency.normalize(group.currency), "total_spend": float(total_spend)}
 
 # API Endpoints: The Core Math Algorithm
 @app.get("/groups/{group_id}/settlements")
@@ -1182,7 +1521,8 @@ def get_suggested_settlements(group_id: str, db: Session = Depends(get_db), _ = 
             "amount": s.amount
         })
 
-    return {"settlements": result}
+    group_currency = currency.normalize(group.currency) if group else currency.DEFAULT_CURRENCY
+    return {"settlements": result, "currency": group_currency}
 
 @app.get("/groups/{group_id}/export.csv")
 def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(require_group_access)):
@@ -1196,6 +1536,7 @@ def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(r
     expenses = db.query(models.Expense).filter(models.Expense.group_id == group_id, models.Expense.is_deleted == False).all()
     settlements = db.query(models.Settlement).filter(models.Settlement.group_id == group_id, models.Settlement.is_deleted == False).all()
 
+    base_currency = currency.normalize(group.currency)
     rows = []
     for expense in expenses:
         rows.append({
@@ -1203,6 +1544,8 @@ def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(r
             "type": "expense",
             "description": expense.description,
             "amount": float(expense.amount),
+            "original_amount": float(expense.original_amount) if expense.original_amount is not None else float(expense.amount),
+            "original_currency": expense.original_currency or base_currency,
             "payer": user_names.get(expense.payer_id, "Unknown"),
             "receiver": "",
             "receipt_url": f"/expenses/{expense.id}/receipt" if expense.receipt_url else "",
@@ -1214,6 +1557,8 @@ def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(r
             "type": "settlement",
             "description": "Settle up payment",
             "amount": float(settlement.amount),
+            "original_amount": float(settlement.amount),
+            "original_currency": base_currency,
             "payer": user_names.get(settlement.payer_id, "Unknown"),
             "receiver": user_names.get(settlement.receiver_id, "Unknown"),
             "receipt_url": "",
@@ -1224,13 +1569,21 @@ def export_group_csv(group_id: str, db: Session = Depends(get_db), _ = Depends(r
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["date", "type", "description", "amount", "payer", "receiver", "receipt_url", "recurring_month"])
+    writer.writerow([
+        "date", "type", "description",
+        "original_amount", "original_currency",
+        f"amount ({base_currency})", "base_currency",
+        "payer", "receiver", "receipt_url", "recurring_month",
+    ])
     for row in rows:
         writer.writerow([
             row["created_at"].isoformat(),
             row["type"],
             row["description"],
+            f"{row['original_amount']:.2f}",
+            row["original_currency"],
             f"{row['amount']:.2f}",
+            base_currency,
             row["payer"],
             row["receiver"],
             row["receipt_url"],

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="frontend/public/logo.png" alt="Splitvero Logo" width="120" />
   <h1>Splitvero</h1>
-  <p><strong>A focused, beautiful, full-stack expense splitter for roommates and small groups.</strong></p>
+  <p><strong>A focused, full-stack, multi-currency expense splitter for roommates and small groups.</strong></p>
 </div>
 
 Splitvero answers the one question people care about most:
@@ -19,6 +19,7 @@ The app supports equal and unequal splits, keeps a persistent audit trail, and m
 - **Email OTP & Google Auth:** Secure, passwordless login using Resend for transactional emails and Google OAuth.
 - **Friendly URLs:** Beautiful, RESTful URLs for your groups (e.g., `splitvero.com/groups/trip-to-hawaii-a1b2c3`).
 - **Equal and Unequal Splits:** Split an expense evenly or enter exact per-person amounts.
+- **Multi-Currency Support:** Record expenses in any supported currency with live exchange rates, custom-rate overrides, and per-group and per-user base currencies.
 - **Netting Algorithm:** Automatically calculates the minimum number of transactions required to settle all debts.
 - **Audit Trail:** Every expense, settlement, and receipt is permanently recorded in the group feed.
 - **Monthly Recurring Bills:** Mark rent, internet, or other repeat bills as monthly, and the server automatically generates them on the due date.
@@ -75,11 +76,22 @@ Whenever a group is opened, the backend checks active recurring templates. If a 
 
 Generated expenses use `recurring_template_id` and `generated_for_month` so a month cannot be generated twice.
 
+### Multi-Currency Support
+Splitvero lets groups track expenses across currencies without losing the original data.
+
+- **Base currencies:** Each group has a base currency (`group.currency`), and each user has a personal `base_currency` used as the default when creating new groups.
+- **Live conversion:** When adding an expense in a currency other than the group base, the frontend fetches a live rate from a free, no-key provider (`open.er-api.com`, cached server-side) and converts the amount automatically.
+- **Two-way sync & custom rates:** Editing the converted amount back-calculates the exchange rate, and editing the rate recalculates the converted amount. Either action flags the expense with `is_custom_rate = true`. A "Reset to live rate" action restores the market rate.
+- **Immutable originals:** Every expense stores `original_amount`, `original_currency`, `exchange_rate`, `converted_amount`, and `is_custom_rate`. The canonical `amount` (and all splits) are kept in the group base currency, so the netting algorithm, CSV export, and audit trail are unchanged.
+- **Changing the base currency:** When a group's base currency changes, past expenses are **recomputed from their immutable originals** at current rates (custom-rate expenses preserve their manual conversion), splits are proportionally rescaled, and settlements are re-expressed — original amounts are never altered.
+
+Balances, group totals, and "who owes whom" are always displayed in the group base currency, while each expense also shows its original amount and a "custom rate" tag where applicable.
+
 ### Receipt Uploads
 One-time expenses can include a receipt image. The backend stores the uploaded file under `backend/uploads/receipts` and saves the receipt URL on the expense. The activity feed shows a paperclip link when a receipt is available.
 
 ### CSV Export
-Each group has a CSV export endpoint (`GET /groups/{group_id}/export.csv`). The export includes date, type, description, amount, payer, receiver, receipt URL, and recurring month.
+Each group has a CSV export endpoint (`GET /groups/{group_id}/export.csv`). The export includes date, type, description, original amount, original currency, converted amount (in the group base currency), base currency, payer, receiver, receipt URL, and recurring month.
 
 ## 🔒 Validation And Safety
 - Expense amounts must be positive.
@@ -88,7 +100,8 @@ Each group has a CSV export endpoint (`GET /groups/{group_id}/export.csv`). The 
 - A settlement must be a payment from one group member to another member in the same group.
 - Expenses are soft-deleted so recalculation remains safe.
 - Groups cannot be deleted while unsettled balances remain.
-- Financial values use `Numeric(10, 2)` on the backend to avoid floating-point storage errors in the database.
+- Financial values use `Numeric(10, 2)` on the backend to avoid floating-point storage errors in the database, and exchange rates use `Numeric(18, 8)` for precision.
+- Multi-currency splits are always validated in the group base currency, so `sum(splits) == converted_amount` holds regardless of the original currency.
 
 ## 🌐 API Overview
 
@@ -105,7 +118,11 @@ FastAPI automatically generates interactive Swagger documentation for this API.
 | `GET` | `/groups/` | List groups |
 | `GET` | `/groups/{group_id}` | Get group details |
 | `POST` | `/groups/{group_id}/members` | Add a user to a group |
-| `POST` | `/expenses/` | Add a one-time expense |
+| `PUT` | `/groups/{group_id}/currency` | Change the group base currency (recalculates conversions) |
+| `GET` | `/currencies` | List supported currencies |
+| `GET` | `/exchange-rate` | Get a live rate between two currencies |
+| `PUT` | `/users/{user_id}` | Update display name and/or personal base currency |
+| `POST` | `/expenses/` | Add a one-time expense (supports multi-currency fields) |
 | `POST` | `/expenses/{expense_id}/receipt` | Upload a receipt image |
 | `POST` | `/recurring-expenses/` | Create a monthly recurring expense |
 | `GET` | `/groups/{group_id}/feed` | Read the audit trail |

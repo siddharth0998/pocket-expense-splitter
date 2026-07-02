@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { WelcomeModal } from "@/components/welcome-modal";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, DEFAULT_CURRENCIES, type CurrencyOption } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowRightLeft, ArrowRight, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, LogOut, UserPlus, User, Mail, DollarSign, FileText } from "lucide-react";
+import { ArrowRightLeft, ArrowRight, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, LogOut, UserPlus, User, Mail, FileText, Coins } from "lucide-react";
 
 type Member = {
   id: string;
@@ -24,6 +24,7 @@ type Group = {
   id: string;
   name: string;
   creator_id: string;
+  currency?: string;
   members: Member[];
 };
 
@@ -37,6 +38,11 @@ type FeedItem = {
   id: string;
   description: string;
   amount: number;
+  original_amount?: number;
+  original_currency?: string;
+  converted_amount?: number;
+  exchange_rate?: number;
+  is_custom_rate?: boolean;
   receipt_url?: string | null;
   generated_for_month?: string | null;
   created_at?: string;
@@ -60,6 +66,8 @@ type RecurringExpense = {
   id: string;
   description: string;
   amount: number;
+  original_amount?: number;
+  original_currency?: string;
   payer_name: string;
   day_of_month: number;
   next_run_on: string;
@@ -113,6 +121,18 @@ export default function GroupDashboard() {
   const [recurringStartDate, setRecurringStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [recurringDayOfMonth, setRecurringDayOfMonth] = useState("");
 
+  // Multi-currency state
+  const [currencies, setCurrencies] = useState<CurrencyOption[]>(DEFAULT_CURRENCIES);
+  const [groupCurrency, setGroupCurrency] = useState<string>("USD");
+  const [originalCurrency, setOriginalCurrency] = useState<string>("USD");
+  const [exchangeRate, setExchangeRate] = useState<number>(1);
+  const [rateStr, setRateStr] = useState<string>("1");
+  const [convertedAmount, setConvertedAmount] = useState<string>("");
+  const [isCustomRate, setIsCustomRate] = useState(false);
+  const [isFetchingRate, setIsFetchingRate] = useState(false);
+  const [isCurrencyModalOpen, setIsCurrencyModalOpen] = useState(false);
+  const [isSavingCurrency, setIsSavingCurrency] = useState(false);
+
   // Settlement States
   const [settlePayer, setSettlePayer] = useState<SelectedMember | null>(null);
   const [settleReceiver, setSettleReceiver] = useState<SelectedMember | null>(null);
@@ -129,6 +149,8 @@ export default function GroupDashboard() {
       ]);
       const loadedGroup = groupData as Group;
       setGroup(loadedGroup);
+      const baseCurrency = (loadedGroup?.currency || feedData?.currency || "USD").toUpperCase();
+      setGroupCurrency(baseCurrency);
       setFeed(Array.isArray(feedData) ? feedData : feedData?.feed || []);
       const loadedSettlements = Array.isArray(settlementData) ? settlementData : settlementData?.settlements || [];
       const uid = localStorage.getItem("splitvero_user_id");
@@ -167,6 +189,132 @@ export default function GroupDashboard() {
       void loadData();
     });
   }, [loadData]);
+
+  // Load the supported currency list once (keeps the built-in fallback if it fails).
+  useEffect(() => {
+    api.getCurrencies()
+      .then((data) => { if (data?.currencies?.length) setCurrencies(data.currencies); })
+      .catch(() => { /* keep built-in fallback */ });
+  }, []);
+
+  // When the expense modal opens, reset the currency inputs to the group base.
+  useEffect(() => {
+    if (isExpenseModalOpen) {
+      setOriginalCurrency(groupCurrency);
+      setExchangeRate(1);
+      setRateStr("1");
+      setConvertedAmount("");
+      setIsCustomRate(false);
+    }
+  }, [isExpenseModalOpen, groupCurrency]);
+
+  // The group-base-currency total that splits are calculated against.
+  const convertedNum = originalCurrency === groupCurrency
+    ? (parseFloat(expenseAmount) || 0)
+    : (parseFloat(convertedAmount) || 0);
+
+  // Fetch a live rate and recompute the converted amount (unless the user set a custom rate).
+  const refreshRate = async (amountStr: string, fromCurrency: string) => {
+    if (fromCurrency === groupCurrency) {
+      setExchangeRate(1);
+      setRateStr("1");
+      setConvertedAmount(amountStr);
+      setIsCustomRate(false);
+      return;
+    }
+    try {
+      setIsFetchingRate(true);
+      const res = await api.getExchangeRate(fromCurrency, groupCurrency);
+      const rate = Number(res?.rate) || 1;
+      setExchangeRate(rate);
+      setRateStr(rate.toFixed(6).replace(/\.?0+$/, ""));
+      const amt = parseFloat(amountStr) || 0;
+      setConvertedAmount((amt * rate).toFixed(2));
+      setIsCustomRate(false);
+    } catch {
+      // Leave existing values on failure.
+    } finally {
+      setIsFetchingRate(false);
+    }
+  };
+
+  const handleOriginalAmountChange = (value: string) => {
+    setExpenseAmount(value);
+    if (originalCurrency === groupCurrency) {
+      setConvertedAmount(value);
+      return;
+    }
+    // Keep two-way sync: original * rate = converted (using current, possibly custom, rate).
+    const amt = parseFloat(value) || 0;
+    if (exchangeRate) {
+      setConvertedAmount((amt * exchangeRate).toFixed(2));
+    }
+  };
+
+  const handleCurrencyChange = (code: string) => {
+    setOriginalCurrency(code);
+    setIsCustomRate(false);
+    void refreshRate(expenseAmount, code);
+  };
+
+  // User manually edited the converted amount -> recompute the rate backward, flag custom.
+  const handleConvertedAmountChange = (value: string) => {
+    setConvertedAmount(value);
+    const orig = parseFloat(expenseAmount) || 0;
+    const conv = parseFloat(value) || 0;
+    if (orig > 0) {
+      const rate = conv / orig;
+      setExchangeRate(rate);
+      setRateStr(rate.toFixed(6).replace(/\.?0+$/, ""));
+      setIsCustomRate(true);
+    }
+  };
+
+  // User manually edited the exchange rate -> recompute the converted amount, flag custom.
+  const handleRateChange = (value: string) => {
+    setRateStr(value);
+    const rate = parseFloat(value) || 0;
+    setExchangeRate(rate);
+    const orig = parseFloat(expenseAmount) || 0;
+    setConvertedAmount((orig * rate).toFixed(2));
+    setIsCustomRate(true);
+  };
+
+  const handleChangeGroupCurrency = async (code: string) => {
+    if (code === groupCurrency) {
+      setIsCurrencyModalOpen(false);
+      return;
+    }
+    try {
+      setIsSavingCurrency(true);
+      await api.changeGroupCurrency(groupId, code);
+      setGroupCurrency(code);
+      setIsCurrencyModalOpen(false);
+      loadData();
+    } catch (error: unknown) {
+      alert(errorMessage(error, "Failed to change group currency."));
+    } finally {
+      setIsSavingCurrency(false);
+    }
+  };
+
+  const formatMoney = (value: number, code: string = groupCurrency) => {
+    try {
+      return new Intl.NumberFormat(undefined, { style: "currency", currency: code }).format(value);
+    } catch {
+      return `${code} ${value.toFixed(2)}`;
+    }
+  };
+
+  // Currency symbol for a code, e.g. "USD" -> "$", "INR" -> "₹", "EUR" -> "€".
+  const currencySymbol = (code: string) => {
+    try {
+      const parts = new Intl.NumberFormat(undefined, { style: "currency", currency: code }).formatToParts(0);
+      return parts.find((p) => p.type === "currency")?.value || code;
+    } catch {
+      return code;
+    }
+  };
 
   // --- Actions ---
   const handleAddMember = async (e: React.FormEvent) => {
@@ -207,7 +355,12 @@ export default function GroupDashboard() {
     e.preventDefault();
     if (!expenseDesc || !expenseAmount || !payerId) return;
 
-    const amountNum = parseFloat(expenseAmount);
+    // Splits are always calculated in the group's base currency (the converted amount).
+    const amountNum = convertedNum;
+    if (!amountNum || amountNum <= 0) {
+      alert("Please enter a valid amount.");
+      return;
+    }
     let splits: Split[] = [];
 
     if (splitType === "equal") {
@@ -241,7 +394,12 @@ export default function GroupDashboard() {
         payer_id: payerId,
         description: expenseDesc,
         amount: amountNum,
-        splits: splits
+        splits: splits,
+        original_amount: parseFloat(expenseAmount) || amountNum,
+        original_currency: originalCurrency,
+        exchange_rate: exchangeRate,
+        converted_amount: amountNum,
+        is_custom_rate: isCustomRate,
       };
 
       if (isRecurringExpense) {
@@ -383,9 +541,19 @@ export default function GroupDashboard() {
         </div>
         <div>
           <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 bg-clip-text text-transparent">{group.name}</h1>
-          <button onClick={() => setIsViewMembersModalOpen(true)} className="text-muted-foreground mt-2 font-medium hover:text-primary transition-colors hover:underline cursor-pointer">
-            {group.members.length} Members
-          </button>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <button onClick={() => setIsViewMembersModalOpen(true)} className="text-muted-foreground font-medium hover:text-primary transition-colors hover:underline cursor-pointer">
+              {group.members.length} Members
+            </button>
+            <span className="text-muted-foreground/50">·</span>
+            <button
+              onClick={() => setIsCurrencyModalOpen(true)}
+              className="inline-flex items-center gap-1 text-xs font-bold uppercase tracking-wider bg-primary/10 text-primary px-2.5 py-1 rounded-full hover:bg-primary/20 transition-colors"
+              title="Change group base currency"
+            >
+              <Coins className="w-3.5 h-3.5" /> {groupCurrency}
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap justify-center gap-3 pt-6 w-full">
@@ -439,6 +607,36 @@ export default function GroupDashboard() {
             </div>
             <Button type="submit" className="w-full rounded-full h-12 text-base font-semibold bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:-translate-y-0.5">Add to Group</Button>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isCurrencyModalOpen} onOpenChange={setIsCurrencyModalOpen}>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl p-0 overflow-hidden gap-0">
+          <div className="relative px-6 pt-9 pb-6 text-center border-b border-border/60 bg-gradient-to-b from-primary/[0.07] to-transparent">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4">
+              <Coins className="w-7 h-7 text-white" />
+            </div>
+            <DialogHeader className="items-center gap-1.5">
+              <DialogTitle className="text-xl font-bold tracking-tight">Group base currency</DialogTitle>
+              <DialogDescription>Totals and balances are shown in this currency. Past expenses keep their original amounts and are recalculated at current rates.</DialogDescription>
+            </DialogHeader>
+          </div>
+          <div className="px-6 pt-6 pb-7 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-foreground">Currency</Label>
+              <Select value={groupCurrency} onValueChange={handleChangeGroupCurrency} disabled={isSavingCurrency}>
+                <SelectTrigger className="rounded-full h-12 px-4 bg-secondary/50 border-border"><SelectValue /></SelectTrigger>
+                <SelectContent position="popper" className="rounded-2xl border-0 shadow-xl w-[var(--radix-select-trigger-width)]">
+                  <SelectGroup className="p-2 max-h-64 overflow-y-auto">
+                    {currencies.map((c) => (
+                      <SelectItem key={c.code} value={c.code} className="rounded-xl py-2.5 px-3">{c.code} · {c.name}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            {isSavingCurrency && <p className="text-xs text-muted-foreground text-center animate-pulse">Recalculating balances…</p>}
+          </div>
         </DialogContent>
       </Dialog>
 
@@ -498,11 +696,64 @@ export default function GroupDashboard() {
             </div>
             <div className="space-y-2">
               <Label className="text-sm font-semibold text-foreground">Amount</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="0.00" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors font-semibold" />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground pointer-events-none">{currencySymbol(originalCurrency)}</span>
+                  <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => handleOriginalAmountChange(e.target.value)} placeholder="0.00" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors font-semibold" />
+                </div>
+                <Select value={originalCurrency} onValueChange={handleCurrencyChange}>
+                  <SelectTrigger className="rounded-full h-12 w-[104px] shrink-0 bg-secondary/50 border-border font-semibold"><SelectValue /></SelectTrigger>
+                  <SelectContent position="popper" className="rounded-2xl border-0 shadow-xl">
+                    <SelectGroup className="p-2 max-h-64 overflow-y-auto">
+                      {currencies.map((c) => (
+                        <SelectItem key={c.code} value={c.code} className="rounded-xl py-2.5 px-3">{c.code} · {c.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+
+            {originalCurrency !== groupCurrency && (
+              <div className="space-y-3 bg-secondary/40 p-4 rounded-3xl border border-border">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="text-sm font-semibold text-foreground">Converted ({groupCurrency})</Label>
+                  {isFetchingRate ? (
+                    <span className="text-xs text-muted-foreground animate-pulse">Fetching rate…</span>
+                  ) : isCustomRate ? (
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary px-2 py-0.5 rounded-full">Custom rate</span>
+                  ) : null}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground pointer-events-none">{currencySymbol(groupCurrency)}</span>
+                  <Input type="number" step="0.01" min="0" value={convertedAmount} onChange={(e) => handleConvertedAmountChange(e.target.value)} placeholder="0.00" className="rounded-full h-12 pl-11 pr-4 bg-card border-border font-semibold" />
+                </div>
+
+                {/* Editable exchange rate */}
+                <div className="flex items-center flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>1 {originalCurrency} =</span>
+                  <Input
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={rateStr}
+                    onChange={(e) => handleRateChange(e.target.value)}
+                    className="h-9 w-28 rounded-full px-3 bg-card border-border text-sm font-semibold text-foreground"
+                  />
+                  <span>{groupCurrency}</span>
+                  {isCustomRate && (
+                    <button
+                      type="button"
+                      onClick={() => refreshRate(expenseAmount, originalCurrency)}
+                      className="ml-auto text-primary font-semibold hover:underline"
+                    >
+                      Reset to live rate
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground pl-1">Splits use this {groupCurrency} amount. Edit the amount or the rate to customize.</p>
+              </div>
+            )}
             <div className="space-y-2">
               <Label className="text-sm font-semibold text-foreground">Who paid?</Label>
               <Select value={payerId} onValueChange={setPayerId}>
@@ -549,7 +800,7 @@ export default function GroupDashboard() {
                     <div key={m.id} className="flex items-center justify-between gap-3">
                       <Label className="flex-1 min-w-0 truncate text-sm font-medium">{m.name}</Label>
                       <div className="relative w-28 shrink-0">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">{currencySymbol(groupCurrency)}</span>
                         <Input
                           type="number"
                           step="0.01"
@@ -563,7 +814,7 @@ export default function GroupDashboard() {
                     </div>
                   ))}
                   <div className="text-xs font-semibold text-right text-muted-foreground mt-2">
-                    Total: ${Object.values(customSplits).reduce((sum, val) => sum + (parseFloat(val) || 0), 0).toFixed(2)} / ${parseFloat(expenseAmount || "0").toFixed(2)}
+                    Total: {formatMoney(Object.values(customSplits).reduce((sum, val) => sum + (parseFloat(val) || 0), 0))} / {formatMoney(convertedNum)}
                   </div>
                 </div>
               )}
@@ -645,7 +896,7 @@ export default function GroupDashboard() {
               <span className="font-bold text-lg">{settleReceiver?.id === currentUserId ? "You" : settleReceiver?.name}</span>
             </div>
             <div className="space-y-2 text-center">
-              <Label className="text-muted-foreground">Payment Amount ($)</Label>
+              <Label className="text-muted-foreground">Payment Amount ({groupCurrency})</Label>
               <Input
                 type="number"
                 step="0.01"
@@ -719,7 +970,7 @@ export default function GroupDashboard() {
                           {settlementText}
                         </div>
                         <div className={`font-extrabold text-3xl tracking-tight mt-1 ${amountColorClass}`}>
-                          ${s.amount.toFixed(2)}
+                          {formatMoney(s.amount)}
                         </div>
                       </div>
                     </div>
@@ -816,8 +1067,16 @@ export default function GroupDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto gap-3 pt-2 sm:pt-0 border-t sm:border-0 border-border/50">
-                      <div className={`font-extrabold text-lg tracking-tight ${amountColorClass}`}>
-                        ${item.amount.toFixed(2)}
+                      <div className="text-right">
+                        <div className={`font-extrabold text-lg tracking-tight ${amountColorClass}`}>
+                          {formatMoney(item.amount)}
+                        </div>
+                        {!isPayment && item.original_currency && item.original_currency !== groupCurrency && (
+                          <div className="text-[11px] font-medium text-muted-foreground mt-0.5">
+                            {formatMoney(item.original_amount ?? item.amount, item.original_currency)}
+                            {item.is_custom_rate ? " · custom rate" : ""}
+                          </div>
+                        )}
                       </div>
                       {item.type === "expense" && !item.is_locked && (item.creator_id ? item.creator_id === currentUserId : item.payer_id === currentUserId) && (
                         <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-red-500 bg-red-500/10 hover:text-red-600 hover:bg-red-500/20 w-10 h-10 rounded-full shrink-0" title="Delete expense">
@@ -852,7 +1111,10 @@ export default function GroupDashboard() {
                     </div>
                   </div>
                   <div className="flex flex-row sm:flex-col justify-between sm:justify-end items-center sm:items-end w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-0 border-border/50">
-                    <div className="font-extrabold text-lg text-foreground tracking-tight">${expense.amount.toFixed(2)}</div>
+                    <div className="font-extrabold text-lg text-foreground tracking-tight">{formatMoney(expense.amount)}</div>
+                    {expense.original_currency && expense.original_currency !== groupCurrency && (
+                      <div className="text-[11px] font-medium text-muted-foreground mt-0.5">{formatMoney(expense.original_amount ?? expense.amount, expense.original_currency)}</div>
+                    )}
                     <div className="text-xs font-semibold text-muted-foreground mt-1">Next: {expense.next_run_on}</div>
                   </div>
                 </div>

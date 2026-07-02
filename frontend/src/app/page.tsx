@@ -6,11 +6,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import Script from "next/script";
-import { AUTH_TOKEN_STORAGE_KEY, api, ApiError } from "@/lib/api";
+import { AUTH_TOKEN_STORAGE_KEY, api, ApiError, DEFAULT_CURRENCIES, type CurrencyOption } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
-import { ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download, Pencil, Check, X } from "lucide-react";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ChevronRight, Users, Receipt, ArrowRightLeft, PlusCircle, Repeat, Paperclip, Download, Pencil, Check, X, Coins, Globe } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { WelcomeModal } from "@/components/welcome-modal";
 import {
@@ -47,6 +48,39 @@ export default function Home() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const [pendingAction, setPendingAction] = useState<"create" | "login">("create");
+  const [currencies, setCurrencies] = useState<CurrencyOption[]>(DEFAULT_CURRENCIES);
+  const [userBaseCurrency, setUserBaseCurrency] = useState<string>("USD");
+  const [isSavingCurrency, setIsSavingCurrency] = useState(false);
+
+  useEffect(() => {
+    api.getCurrencies()
+      .then((data) => { if (data?.currencies?.length) setCurrencies(data.currencies); })
+      .catch(() => { /* keep built-in fallback */ });
+    if (typeof window !== "undefined") {
+      setUserBaseCurrency(localStorage.getItem("splitvero_base_currency") || "USD");
+    }
+  }, []);
+
+  const handleChangeUserCurrency = async (code: string) => {
+    const userId = localStorage.getItem("splitvero_user_id");
+    if (!userId || code === userBaseCurrency) return;
+    const previous = userBaseCurrency;
+    setUserBaseCurrency(code);
+    try {
+      setIsSavingCurrency(true);
+      const updated = await api.updateUserCurrency(userId, code);
+      localStorage.setItem("splitvero_base_currency", code);
+      if (updated?.token) {
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, updated.token);
+      }
+    } catch (error) {
+      console.error("Failed to update currency:", error);
+      setUserBaseCurrency(previous);
+      alert("Failed to update your default currency.");
+    } finally {
+      setIsSavingCurrency(false);
+    }
+  };
 
   const fetchGroups = async () => {
     try {
@@ -77,7 +111,13 @@ export default function Home() {
   // Handle clicking outside of the profile menu to close it
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as HTMLElement;
+      // Radix Select renders its dropdown in a portal outside the menu. Ignore those
+      // clicks so interacting with the currency selector doesn't close the profile menu.
+      if (target.closest?.('[data-slot="select-content"]') || target.closest?.('[data-radix-popper-content-wrapper]')) {
+        return;
+      }
+      if (profileMenuRef.current && !profileMenuRef.current.contains(target)) {
         setIsProfileMenuOpen(false);
       }
     }
@@ -209,6 +249,26 @@ export default function Home() {
                         </span>
                         Change Name
                       </button>
+
+                      {/* Default currency */}
+                      <div className="px-2.5 py-2 flex items-center gap-3">
+                        <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <Coins className="w-4 h-4 text-primary" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold text-muted-foreground mb-1">Default currency</div>
+                          <Select value={userBaseCurrency} onValueChange={handleChangeUserCurrency} disabled={isSavingCurrency}>
+                            <SelectTrigger className="h-8 rounded-lg text-sm bg-secondary/50 border-border"><SelectValue /></SelectTrigger>
+                            <SelectContent position="popper" className="rounded-2xl border-0 shadow-xl">
+                              <SelectGroup className="p-2 max-h-56 overflow-y-auto">
+                                {currencies.map((c) => (
+                                  <SelectItem key={c.code} value={c.code} className="rounded-xl py-2 px-3">{c.code} · {c.name}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
                       <button 
                         onClick={handleLogout} 
                         className="group text-left text-sm px-2.5 py-2.5 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors flex items-center gap-3 font-medium"
@@ -257,7 +317,7 @@ export default function Home() {
             <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 bg-clip-text text-transparent">friends, roommates, and trips.</span>
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto">
-            Split shared bills, track receipts, handle recurring expenses, and settle up with fewer payments.
+            Split shared bills in any currency, track receipts, handle recurring expenses, and settle up with fewer payments.
           </p>
         </div>
 
@@ -352,7 +412,17 @@ export default function Home() {
             <p className="text-muted-foreground max-w-2xl mx-auto">Everything you need to manage complex group finances, built right in.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+            <Card className="group bg-card/60 backdrop-blur-sm border border-border/60 shadow-sm hover:shadow-xl hover:shadow-indigo-500/10 hover:-translate-y-1 transition-all duration-300 rounded-3xl">
+              <CardContent className="p-8 space-y-4 text-center flex flex-col items-center">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 flex items-center justify-center text-white shadow-lg shadow-fuchsia-500/30 mb-2 group-hover:scale-110 transition-transform duration-300">
+                  <Globe className="w-6 h-6" />
+                </div>
+                <h3 className="text-xl font-bold text-foreground">Multi-Currency</h3>
+                <p className="text-muted-foreground text-sm">Add expenses in any currency with live exchange rates. Totals settle in your group&apos;s base currency.</p>
+              </CardContent>
+            </Card>
+
             <Card className="group bg-card/60 backdrop-blur-sm border border-border/60 shadow-sm hover:shadow-xl hover:shadow-orange-500/10 hover:-translate-y-1 transition-all duration-300 rounded-3xl">
               <CardContent className="p-8 space-y-4 text-center flex flex-col items-center">
                 <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-orange-500/30 mb-2 group-hover:scale-110 transition-transform duration-300">
@@ -414,6 +484,12 @@ export default function Home() {
             <AccordionTrigger className="text-left text-lg">Can I split expenses unequally?</AccordionTrigger>
             <AccordionContent className="text-muted-foreground text-base">
               Absolutely. When adding an expense, you can switch from &quot;Equal&quot; to &quot;Exact&quot; splits and manually assign who owes what.
+            </AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-currency">
+            <AccordionTrigger className="text-left text-lg">Does it support multiple currencies?</AccordionTrigger>
+            <AccordionContent className="text-muted-foreground text-base">
+              Yes. Each group has a base currency, and you can enter any expense in a different currency. Splitvero fetches the live exchange rate and converts it automatically, though you can override the rate or converted amount for a custom rate. Balances and totals are always shown in the group&apos;s base currency, while each expense keeps its original amount.
             </AccordionContent>
           </AccordionItem>
           <AccordionItem value="item-5">

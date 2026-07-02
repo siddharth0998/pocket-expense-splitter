@@ -20,6 +20,7 @@ class User(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
+    base_currency = Column(String(3), default="USD", nullable=False)  # Personal dashboard default currency
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Relationships
@@ -59,7 +60,13 @@ class Expense(Base):
     creator_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True) # Nullable for grandfathering
     payer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     description = Column(String, nullable=False)
-    amount = Column(Numeric(10, 2), nullable=False) # Precision Loophole Fix
+    amount = Column(Numeric(10, 2), nullable=False) # Canonical group-base-currency amount (== converted_amount). Used by splits/algorithm/CSV.
+    # --- Multi-currency fields (expressed against the group's current base currency) ---
+    original_amount = Column(Numeric(12, 2), nullable=True)   # Amount as entered by the user
+    original_currency = Column(String(3), nullable=True)      # ISO code of the entered amount, e.g. 'USD', 'EUR', 'INR'
+    exchange_rate = Column(Numeric(18, 8), nullable=True)     # Rate applied: original_currency -> group base currency
+    converted_amount = Column(Numeric(12, 2), nullable=True)  # original_amount * exchange_rate (group base currency)
+    is_custom_rate = Column(Boolean, default=False, nullable=False)  # True if the user manually edited the converted amount/rate
     receipt_url = Column(String, nullable=True)
     receipt_filename = Column(String, nullable=True)
     recurring_template_id = Column(String, ForeignKey("recurring_expense_templates.id", ondelete="SET NULL"), nullable=True)
@@ -106,7 +113,13 @@ class RecurringExpenseTemplate(Base):
     group_id = Column(String, ForeignKey("groups.id", ondelete="CASCADE"), nullable=False, index=True)
     payer_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     description = Column(String, nullable=False)
-    amount = Column(Numeric(10, 2), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)  # Canonical group-base-currency amount for generated expenses
+    # --- Multi-currency fields. Generated expenses re-fetch a live rate at generation time. ---
+    original_amount = Column(Numeric(12, 2), nullable=True)
+    original_currency = Column(String(3), nullable=True)
+    exchange_rate = Column(Numeric(18, 8), nullable=True)
+    converted_amount = Column(Numeric(12, 2), nullable=True)
+    is_custom_rate = Column(Boolean, default=False, nullable=False)
     day_of_month = Column(Integer, nullable=False)
     next_run_on = Column(Date, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)

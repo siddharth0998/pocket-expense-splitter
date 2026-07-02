@@ -65,10 +65,13 @@ export function WelcomeModal({ isOpen, onClose, onSuccess }: { isOpen: boolean; 
     }
   };
 
-  const finishLogin = (user: { id: string, name: string, token: string }) => {
+  const finishLogin = (user: { id: string, name: string, token: string, base_currency?: string }) => {
     localStorage.setItem("splitvero_user_id", user.id);
     localStorage.setItem("splitvero_user_name", user.name);
     localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, user.token);
+    if (user.base_currency) {
+      localStorage.setItem("splitvero_base_currency", user.base_currency);
+    }
     setStep(1);
     setOtpCode("");
     onSuccess();

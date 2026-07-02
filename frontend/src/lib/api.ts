@@ -15,7 +15,41 @@ export interface ExpensePayload {
   description: string;
   amount: number;
   splits: Split[];
+  // Multi-currency (optional)
+  original_amount?: number;
+  original_currency?: string;
+  exchange_rate?: number;
+  converted_amount?: number;
+  is_custom_rate?: boolean;
 }
+
+export interface CurrencyOption {
+  code: string;
+  name: string;
+}
+
+// Built-in fallback so currency dropdowns are never empty, even if the
+// /currencies endpoint is temporarily unreachable. Kept in sync with the backend.
+export const DEFAULT_CURRENCIES: CurrencyOption[] = [
+  { code: "USD", name: "US Dollar" },
+  { code: "EUR", name: "Euro" },
+  { code: "GBP", name: "British Pound" },
+  { code: "INR", name: "Indian Rupee" },
+  { code: "JPY", name: "Japanese Yen" },
+  { code: "CAD", name: "Canadian Dollar" },
+  { code: "AUD", name: "Australian Dollar" },
+  { code: "CHF", name: "Swiss Franc" },
+  { code: "CNY", name: "Chinese Yuan" },
+  { code: "SGD", name: "Singapore Dollar" },
+  { code: "AED", name: "UAE Dirham" },
+  { code: "NZD", name: "New Zealand Dollar" },
+  { code: "ZAR", name: "South African Rand" },
+  { code: "BRL", name: "Brazilian Real" },
+  { code: "MXN", name: "Mexican Peso" },
+  { code: "SEK", name: "Swedish Krona" },
+  { code: "NOK", name: "Norwegian Krone" },
+  { code: "HKD", name: "Hong Kong Dollar" },
+];
 
 export interface RecurringExpensePayload extends ExpensePayload {
   start_date?: string;
@@ -201,6 +235,19 @@ export const api = {
     
   deleteGroup: (groupId: string) => 
     fetchAPI(`/groups/${groupId}`, { method: "DELETE" }),
+
+  // Multi-currency
+  getCurrencies: () =>
+    fetchAPI("/currencies"),
+
+  getExchangeRate: (base: string, target: string) =>
+    fetchAPI(`/exchange-rate?base=${encodeURIComponent(base)}&target=${encodeURIComponent(target)}`),
+
+  updateUserCurrency: (userId: string, base_currency: string) =>
+    fetchAPI(`/users/${userId}`, { method: "PUT", body: JSON.stringify({ base_currency }) }),
+
+  changeGroupCurrency: (groupId: string, currency: string) =>
+    fetchAPI(`/groups/${groupId}/currency`, { method: "PUT", body: JSON.stringify({ currency }) }),
     
   deleteExpense: (expenseId: string) => 
     fetchAPI(`/expenses/${expenseId}`, { method: "DELETE" }),
