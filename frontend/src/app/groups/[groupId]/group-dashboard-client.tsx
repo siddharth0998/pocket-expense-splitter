@@ -4,16 +4,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { WelcomeModal } from "@/components/welcome-modal";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { ArrowRightLeft, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, LogOut } from "lucide-react";
+import { ArrowRightLeft, ArrowRight, CalendarClock, Download, Paperclip, Receipt, PlusCircle, Users, Trash2, LogOut, UserPlus, User, Mail, DollarSign, FileText } from "lucide-react";
 
 type Member = {
   id: string;
@@ -147,6 +147,14 @@ export default function GroupDashboard() {
         setInvolvedMembers(loadedGroup.members.map((m) => m.id));
       }
     } catch (error: unknown) {
+      // An expired/invalid session (401): the api layer clears the stale token.
+      // Show a clear prompt so the user can re-identify via the login modal
+      // (rendered within the error screen below).
+      if (error instanceof ApiError && error.status === 401) {
+        setError("Your session has expired. Please sign in again to view this group.");
+        setIsLoading(false);
+        return;
+      }
       console.error("Failed to load group data", error);
       setError(errorMessage(error, "Failed to load group."));
     } finally {
@@ -360,25 +368,28 @@ export default function GroupDashboard() {
   if (!group) return <div className="p-8 text-center text-red-500">Group not found.</div>;
 
   return (
-    <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-8 min-h-screen bg-background pb-20 relative">
+    <div className="max-w-2xl mx-auto p-4 md:p-6 space-y-8 min-h-screen bg-background pb-20 relative overflow-hidden">
+      {/* Decorative gradient glow */}
+      <div className="absolute top-[-10%] left-1/2 -translate-x-1/2 w-[80%] h-[35%] rounded-full bg-gradient-to-br from-indigo-500/20 via-purple-500/15 to-fuchsia-500/20 blur-[120px] pointer-events-none" />
+
       <div className="absolute top-4 right-4 z-50">
         <ThemeToggle />
       </div>
 
       {/* HEADER SECTION */}
-      <div className="flex flex-col items-center text-center space-y-4 py-8 animate-in fade-in slide-in-from-top-4 duration-700">
-        <div className="bg-primary/10 p-4 rounded-full mb-2">
-          <Users className="w-8 h-8 text-primary" />
+      <div className="flex flex-col items-center text-center space-y-4 py-8 animate-in fade-in slide-in-from-top-4 duration-700 relative">
+        <div className="bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 p-4 rounded-2xl mb-2 shadow-lg shadow-purple-500/30">
+          <Users className="w-8 h-8 text-white" />
         </div>
         <div>
-          <h1 className="text-4xl font-extrabold tracking-tight text-foreground">{group.name}</h1>
+          <h1 className="text-4xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 bg-clip-text text-transparent">{group.name}</h1>
           <button onClick={() => setIsViewMembersModalOpen(true)} className="text-muted-foreground mt-2 font-medium hover:text-primary transition-colors hover:underline cursor-pointer">
             {group.members.length} Members
           </button>
         </div>
 
         <div className="flex flex-wrap justify-center gap-3 pt-6 w-full">
-          <Button size="lg" className="rounded-full shadow-lg shadow-primary/20 h-12 px-6" onClick={() => setIsExpenseModalOpen(true)}>
+          <Button size="lg" className="rounded-full h-12 px-6 bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:shadow-xl hover:shadow-purple-500/30 hover:-translate-y-0.5" onClick={() => setIsExpenseModalOpen(true)}>
             <PlusCircle className="w-5 h-5 mr-2" /> Add Expense
           </Button>
           <Button variant="outline" size="lg" className="rounded-full bg-card shadow-sm h-12 px-6 border-border hover:border-primary/50" onClick={() => setIsMemberModalOpen(true)}>
@@ -398,20 +409,35 @@ export default function GroupDashboard() {
 
       {/* MODALS */}
       <Dialog open={isMemberModalOpen} onOpenChange={setIsMemberModalOpen}>
-        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl">
-          <DialogHeader><DialogTitle className="text-xl">Add a new member</DialogTitle></DialogHeader>
-          <form onSubmit={handleAddMember} className="space-y-4 pt-4">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
-              </div>
-              <div className="space-y-2">
-                <Label>Email Address</Label>
-                <Input value={newMemberEmail} onChange={(e) => setNewMemberEmail(e.target.value)} type="email" placeholder="e.g., alice@example.com" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl p-0 overflow-hidden gap-0">
+          {/* Header */}
+          <div className="relative px-6 pt-9 pb-6 text-center border-b border-border/60 bg-gradient-to-b from-primary/[0.07] to-transparent">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4">
+              <UserPlus className="w-7 h-7 text-white" />
+            </div>
+            <DialogHeader className="items-center gap-1.5">
+              <DialogTitle className="text-xl font-bold tracking-tight">Add a new member</DialogTitle>
+              <DialogDescription>Invite someone to share and split expenses with the group.</DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <form onSubmit={handleAddMember} className="space-y-5 px-6 pt-6 pb-7">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-foreground">Full name</Label>
+              <div className="relative">
+                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input value={newMemberName} onChange={(e) => setNewMemberName(e.target.value)} placeholder="e.g., Alice" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors" />
               </div>
             </div>
-            <Button type="submit" className="w-full rounded-full h-12">Add to Group</Button>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold text-foreground">Email address</Label>
+              <div className="relative">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input value={newMemberEmail} onChange={(e) => setNewMemberEmail(e.target.value)} type="email" placeholder="alice@example.com" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors" />
+              </div>
+              <p className="text-xs text-muted-foreground pl-1 pt-0.5">They&apos;ll be able to sign in with this email to view the group.</p>
+            </div>
+            <Button type="submit" className="w-full rounded-full h-12 text-base font-semibold bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:-translate-y-0.5">Add to Group</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -428,7 +454,7 @@ export default function GroupDashboard() {
               group.members.map((member) => (
                 <div key={member.id} className="flex justify-between items-center bg-secondary/30 p-3 rounded-2xl border border-border hover:bg-secondary/50 transition-colors">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold shadow-sm">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold shadow-md shadow-indigo-500/20">
                       {member.name.charAt(0).toUpperCase()}
                     </div>
                     <span className="font-semibold text-foreground truncate max-w-[150px]">{member.name}</span>
@@ -450,22 +476,35 @@ export default function GroupDashboard() {
       </Dialog>
 
       <Dialog open={isExpenseModalOpen} onOpenChange={setIsExpenseModalOpen}>
-        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col overflow-hidden p-0">
-          <div className="pt-6 px-6">
-            <DialogHeader><DialogTitle className="text-xl">Record an expense</DialogTitle></DialogHeader>
+        <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl max-h-[90dvh] sm:max-h-[85vh] flex flex-col overflow-hidden p-0 gap-0">
+          {/* Header */}
+          <div className="relative px-6 pt-9 pb-6 text-center border-b border-border/60 bg-gradient-to-b from-primary/[0.07] to-transparent shrink-0">
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 via-purple-500 to-fuchsia-500 flex items-center justify-center shadow-lg shadow-purple-500/30 mb-4">
+              <Receipt className="w-7 h-7 text-white" />
+            </div>
+            <DialogHeader className="items-center gap-1.5">
+              <DialogTitle className="text-xl font-bold tracking-tight">Record an expense</DialogTitle>
+              <DialogDescription>Add a shared cost and choose how it&apos;s split.</DialogDescription>
+            </DialogHeader>
           </div>
           <div className="overflow-y-auto px-6 pb-6 flex-1 min-h-0">
-            <form onSubmit={handleAddExpense} className="space-y-4 pt-4 pb-4">
+            <form onSubmit={handleAddExpense} className="space-y-4 pt-6 pb-4">
             <div className="space-y-2">
-              <Label>Description</Label>
-              <Input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="Dinner at Joe's" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+              <Label className="text-sm font-semibold text-foreground">Description</Label>
+              <div className="relative">
+                <FileText className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input value={expenseDesc} onChange={(e) => setExpenseDesc(e.target.value)} placeholder="Dinner at Joe's" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors" />
+              </div>
             </div>
             <div className="space-y-2">
-              <Label>Amount ($)</Label>
-              <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="0.00" className="rounded-full h-12 px-4 bg-secondary/50 border-border" />
+              <Label className="text-sm font-semibold text-foreground">Amount</Label>
+              <div className="relative">
+                <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                <Input type="number" step="0.01" min="0.01" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} placeholder="0.00" className="rounded-full h-12 pl-11 pr-4 bg-secondary/50 border-border focus-visible:bg-background focus-visible:ring-primary transition-colors font-semibold" />
+              </div>
             </div>
             <div className="space-y-2">
-              <Label>Who Paid?</Label>
+              <Label className="text-sm font-semibold text-foreground">Who paid?</Label>
               <Select value={payerId} onValueChange={setPayerId}>
                 <SelectTrigger className="rounded-full h-12 px-4 bg-secondary/50 border-border"><SelectValue placeholder="Select a member" /></SelectTrigger>
                 <SelectContent position="popper" className="rounded-2xl border-0 shadow-xl w-[var(--radix-select-trigger-width)]">
@@ -481,10 +520,10 @@ export default function GroupDashboard() {
             {/* Custom Split Toggle */}
             <div className="space-y-4 pt-4 border-t border-border mt-4">
               <div className="flex justify-between items-center">
-                <Label>How to split?</Label>
+                <Label className="text-sm font-semibold text-foreground">How to split?</Label>
                 <div className="flex gap-2 bg-secondary p-1 rounded-full">
-                  <Button type="button" variant={splitType === "equal" ? "default" : "ghost"} size="sm" className="rounded-full h-8" onClick={() => setSplitType("equal")}>Equal</Button>
-                  <Button type="button" variant={splitType === "exact" ? "default" : "ghost"} size="sm" className="rounded-full h-8" onClick={() => setSplitType("exact")}>Exact</Button>
+                  <Button type="button" variant={splitType === "equal" ? "default" : "ghost"} size="sm" className={`rounded-full h-8 ${splitType === "equal" ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white border-0 shadow-sm hover:opacity-90" : ""}`} onClick={() => setSplitType("equal")}>Equal</Button>
+                  <Button type="button" variant={splitType === "exact" ? "default" : "ghost"} size="sm" className={`rounded-full h-8 ${splitType === "exact" ? "bg-gradient-to-r from-indigo-500 to-purple-500 text-white border-0 shadow-sm hover:opacity-90" : ""}`} onClick={() => setSplitType("exact")}>Exact</Button>
                 </div>
               </div>
 
@@ -507,17 +546,20 @@ export default function GroupDashboard() {
               ) : (
                 <div className="space-y-3 mt-2 bg-secondary/50 p-4 rounded-3xl border border-border">
                   {group.members.map((m) => (
-                    <div key={m.id} className="flex items-center space-x-3">
-                      <Label className="w-24 truncate">{m.name}</Label>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="0.00"
-                        value={customSplits[m.id] || ""}
-                        onChange={(e) => setCustomSplits({ ...customSplits, [m.id]: e.target.value })}
-                        className="rounded-full h-10 bg-card border-border"
-                      />
+                    <div key={m.id} className="flex items-center justify-between gap-3">
+                      <Label className="flex-1 min-w-0 truncate text-sm font-medium">{m.name}</Label>
+                      <div className="relative w-28 shrink-0">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={customSplits[m.id] || ""}
+                          onChange={(e) => setCustomSplits({ ...customSplits, [m.id]: e.target.value })}
+                          className="rounded-full h-10 pl-7 pr-3 bg-card border-border text-right"
+                        />
+                      </div>
                     </div>
                   ))}
                   <div className="text-xs font-semibold text-right text-muted-foreground mt-2">
@@ -568,7 +610,7 @@ export default function GroupDashboard() {
             <div className="space-y-2 pt-4 border-t border-border">
               <Label>Receipt photo</Label>
               <div className={`relative flex items-center h-12 bg-secondary/50 border border-border rounded-full px-2 overflow-hidden transition-opacity ${isRecurringExpense ? "opacity-50 cursor-not-allowed" : "hover:bg-secondary/80"}`}>
-                <div className="bg-primary text-primary-foreground shadow-sm shadow-primary/20 font-semibold text-sm px-4 py-1.5 rounded-full mr-3 pointer-events-none">
+                <div className="bg-gradient-to-r from-indigo-500 to-purple-500 text-white shadow-sm shadow-purple-500/20 font-semibold text-sm px-4 py-1.5 rounded-full mr-3 pointer-events-none">
                   Choose file
                 </div>
                 <span className="text-sm text-muted-foreground truncate pointer-events-none pr-4">
@@ -585,7 +627,7 @@ export default function GroupDashboard() {
               </div>
             </div>
 
-            <Button type="submit" size="lg" className="w-full mt-6 rounded-full h-12 text-md" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
+            <Button type="submit" size="lg" className="w-full mt-6 rounded-full h-12 text-md bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-y-0" disabled={group.members.length === 0 || (splitType === "equal" && involvedMembers.length === 0)}>
               {(splitType === "equal" && involvedMembers.length === 0) ? "Select at least one person!" : isRecurringExpense ? "Save Monthly Expense" : "Save Expense"}
             </Button>
             </form>
@@ -597,10 +639,10 @@ export default function GroupDashboard() {
         <DialogContent className="rounded-3xl sm:rounded-3xl border-0 shadow-2xl">
           <DialogHeader><DialogTitle className="text-xl">Settle Up</DialogTitle></DialogHeader>
           <form onSubmit={handleSettleUp} className="space-y-6 pt-4">
-            <div className="bg-primary/5 p-4 rounded-3xl text-sm text-primary flex items-center justify-center gap-3">
-              <span className="font-bold text-lg">{settlePayer?.name}</span>
-              <ArrowRightLeft className="w-5 h-5 opacity-50" />
-              <span className="font-bold text-lg">{settleReceiver?.name}</span>
+            <div className="bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-fuchsia-500/10 border border-primary/15 p-4 rounded-3xl text-sm text-primary flex items-center justify-center gap-3">
+              <span className="font-bold text-lg">{settlePayer?.id === currentUserId ? "You" : settlePayer?.name}</span>
+              <ArrowRight className="w-5 h-5 opacity-60 shrink-0" />
+              <span className="font-bold text-lg">{settleReceiver?.id === currentUserId ? "You" : settleReceiver?.name}</span>
             </div>
             <div className="space-y-2 text-center">
               <Label className="text-muted-foreground">Payment Amount ($)</Label>
@@ -613,7 +655,7 @@ export default function GroupDashboard() {
                 className="rounded-full h-16 text-3xl font-bold text-center bg-secondary/50 border-border focus-visible:ring-primary shadow-inner"
               />
             </div>
-            <Button type="submit" size="lg" className="w-full rounded-full h-12 text-lg">Record Payment</Button>
+            <Button type="submit" size="lg" className="w-full rounded-full h-12 text-lg bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:-translate-y-0.5">Record Payment</Button>
           </form>
         </DialogContent>
       </Dialog>
@@ -623,8 +665,8 @@ export default function GroupDashboard() {
         {/* SETTLEMENTS */}
         <div className="space-y-5">
           <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
-            <div className="bg-indigo-100 p-2 rounded-xl text-primary"><ArrowRightLeft className="w-5 h-5" /></div>
-            How to Settle Up
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-500 p-2 rounded-xl text-white shadow-md shadow-purple-500/25"><ArrowRightLeft className="w-5 h-5" /></div>
+            Settle Up
           </h2>
 
           {settlements.length === 0 ? (
@@ -666,7 +708,7 @@ export default function GroupDashboard() {
                 }
 
                 return (
-                <div key={index} className={`overflow-hidden border shadow-md rounded-[2.5rem] hover:shadow-lg transition-shadow ${isInvolved ? 'bg-primary/5 border-primary/20' : 'bg-card border-border'}`}>
+                <div key={index} className={`overflow-hidden border shadow-md rounded-[2.5rem] hover:shadow-lg transition-all hover:-translate-y-0.5 ${isInvolved ? 'bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-fuchsia-500/10 border-primary/20' : 'bg-card border-border'}`}>
                   <div className="p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-5">
                     <div className="flex items-center gap-5">
                       <div className={`w-14 h-14 rounded-[1.5rem] flex items-center justify-center shrink-0 ${iconColorClass}`}>
@@ -684,7 +726,7 @@ export default function GroupDashboard() {
                     {isInvolved && (
                       <Button
                         size="lg"
-                        className="rounded-full w-full sm:w-auto font-semibold px-8"
+                        className="rounded-full w-full sm:w-auto font-semibold px-8 bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-md shadow-purple-500/25 transition-all hover:-translate-y-0.5"
                         onClick={() => openSettleModal(s.payer_name, s.payer_id, s.receiver_name, s.receiver_id, s.amount)}
                       >
                         Settle
@@ -701,7 +743,7 @@ export default function GroupDashboard() {
         {/* RECENT ACTIVITY */}
         <div className="space-y-5">
           <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
-            <div className="bg-indigo-100 p-2 rounded-xl text-primary"><Receipt className="w-5 h-5" /></div>
+            <div className="bg-gradient-to-br from-fuchsia-500 to-pink-500 p-2 rounded-xl text-white shadow-md shadow-pink-500/25"><Receipt className="w-5 h-5" /></div>
             Recent Activity
           </h2>
 
@@ -716,7 +758,7 @@ export default function GroupDashboard() {
               feed.map((item, index) => {
                 const isPayment = item.type === "settlement";
                 
-                let iconColorClass = isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-primary/10 text-primary';
+                let iconColorClass = isPayment ? 'bg-emerald-50 text-emerald-600' : 'bg-gradient-to-br from-indigo-500 to-purple-500 text-white shadow-md shadow-purple-500/20';
                 let amountColorClass = isPayment ? 'text-emerald-600' : 'text-foreground';
                 let descriptionText = item.description;
 
@@ -742,7 +784,7 @@ export default function GroupDashboard() {
                 }
 
                 return (
-                  <div key={index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md transition-shadow">
+                  <div key={index} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
                       <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 ${iconColorClass}`}>
                         {isPayment ? <ArrowRightLeft className="w-5 h-5" /> : <Receipt className="w-5 h-5" />}
@@ -778,7 +820,7 @@ export default function GroupDashboard() {
                         ${item.amount.toFixed(2)}
                       </div>
                       {item.type === "expense" && !item.is_locked && (item.creator_id ? item.creator_id === currentUserId : item.payer_id === currentUserId) && (
-                        <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-zinc-300 hover:text-red-500 hover:bg-red-50 w-10 h-10 rounded-full shrink-0">
+                        <Button variant="ghost" size="icon" onClick={() => handleDeleteExpense(item.id, item.type)} className="text-red-500 bg-red-500/10 hover:text-red-600 hover:bg-red-500/20 w-10 h-10 rounded-full shrink-0" title="Delete expense">
                           <Trash2 className="w-5 h-5" />
                         </Button>
                       )}
@@ -794,15 +836,15 @@ export default function GroupDashboard() {
         {recurringExpenses.length > 0 && (
           <div className="space-y-5 pt-4">
             <h2 className="text-xl font-extrabold text-foreground flex items-center gap-3 px-2">
-              <div className="bg-orange-100 p-2 rounded-xl text-orange-600"><CalendarClock className="w-5 h-5" /></div>
+              <div className="bg-gradient-to-br from-orange-400 to-amber-500 p-2 rounded-xl text-white shadow-md shadow-orange-500/25"><CalendarClock className="w-5 h-5" /></div>
               Monthly Expenses
             </h2>
             <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2">
               {recurringExpenses.map((expense) => (
-                <div key={expense.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm">
+                <div key={expense.id} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 gap-4 bg-card border border-border rounded-[2rem] shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all">
                   <div className="flex items-center gap-4 w-full sm:w-auto">
-                    <div className="w-12 h-12 rounded-[1.25rem] bg-orange-50 flex items-center justify-center shrink-0">
-                      <CalendarClock className="w-5 h-5 text-orange-500" />
+                    <div className="w-12 h-12 rounded-[1.25rem] bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center shrink-0 shadow-md shadow-orange-500/20">
+                      <CalendarClock className="w-5 h-5 text-white" />
                     </div>
                     <div>
                       <div className="font-bold text-foreground text-base">{expense.description}</div>

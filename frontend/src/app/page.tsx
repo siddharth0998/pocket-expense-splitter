@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import Script from "next/script";
-import { AUTH_TOKEN_STORAGE_KEY, api } from "@/lib/api";
+import { AUTH_TOKEN_STORAGE_KEY, api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -53,6 +53,13 @@ export default function Home() {
       const data = await api.getAllGroups();
       setGroups(data);
     } catch (error) {
+      // An expired/invalid session (401) is expected when a stale token lingers.
+      // The api layer already clears it; just reset the signed-in UI state.
+      if (error instanceof ApiError && error.status === 401) {
+        setUserName(null);
+        setGroups([]);
+        return;
+      }
       console.error("Failed to load existing groups:", error);
     }
   };
@@ -150,17 +157,17 @@ export default function Home() {
         <div className="flex items-center gap-2 font-bold text-xl text-foreground shrink-0">
           <Image src="/logo.png" alt="" width={32} height={32} priority className="w-8 h-8" />
           <span className={isEditingName ? "hidden sm:inline-block" : "inline-block"}>Splitvero</span>
-          <a href="mailto:splitverosupport@gmail.com?subject=Splitvero Bug Report" className="ml-2 text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary px-2 py-0.5 rounded-full hover:bg-primary/20 transition-colors hidden sm:block border border-primary/20">Beta</a>
+          <a href="mailto:splitverosupport@gmail.com?subject=Splitvero Bug Report" className={`ml-2 text-[10px] font-bold uppercase tracking-wider bg-gradient-to-r from-indigo-500 to-fuchsia-500 text-white px-2 py-0.5 rounded-full hover:opacity-90 transition-opacity shadow-sm shadow-fuchsia-500/30 ${isEditingName ? "hidden sm:block" : "block"}`}>Beta</a>
         </div>
         <div className="flex items-center gap-2 sm:gap-4">
           {userName ? (
             <div ref={profileMenuRef} className="flex items-center gap-2 text-sm font-medium relative">
               {isEditingName ? (
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-2 bg-background/80 backdrop-blur-sm border border-border/60 rounded-full p-1 pl-1.5 shadow-sm">
                   <Input 
                     value={editNameValue} 
                     onChange={(e) => setEditNameValue(e.target.value)}
-                    className="h-7 px-2 py-1 w-[120px] text-xs"
+                    className="h-8 px-3 w-[110px] sm:w-[150px] text-sm rounded-full border-0 bg-transparent focus-visible:ring-0 shadow-none"
                     autoFocus
                     disabled={isSavingName}
                     onKeyDown={(e) => {
@@ -168,8 +175,8 @@ export default function Home() {
                       if (e.key === 'Escape') setIsEditingName(false);
                     }}
                   />
-                  <button disabled={isSavingName} onClick={handleSaveName} className="p-1 hover:bg-secondary rounded"><Check className="w-3.5 h-3.5 text-green-500" /></button>
-                  <button disabled={isSavingName} onClick={() => setIsEditingName(false)} className="p-1 hover:bg-secondary rounded"><X className="w-3.5 h-3.5 text-red-500" /></button>
+                  <button disabled={isSavingName} onClick={handleSaveName} title="Save" className="w-8 h-8 flex items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 transition-colors disabled:opacity-50 shrink-0"><Check className="w-4 h-4" /></button>
+                  <button disabled={isSavingName} onClick={() => setIsEditingName(false)} title="Cancel" className="w-8 h-8 flex items-center justify-center rounded-full bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors disabled:opacity-50 shrink-0"><X className="w-4 h-4" /></button>
                 </div>
               ) : (
                 <>
@@ -182,22 +189,34 @@ export default function Home() {
 
                   {/* Dropdown Menu */}
                   {isProfileMenuOpen && (
-                    <div className="absolute top-12 right-0 w-52 bg-background/80 backdrop-blur-xl border border-border/50 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 duration-200">
-                      <div className="px-3 py-2 border-b border-border/50 mb-1">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-0.5">Signed In As</div>
-                        <div className="text-sm font-bold truncate text-foreground">{userName}</div>
+                    <div className="absolute top-12 right-0 w-64 bg-background/90 backdrop-blur-xl border border-border/60 rounded-2xl shadow-2xl p-2 flex flex-col gap-1 z-50 animate-in fade-in zoom-in-95 duration-200">
+                      {/* Profile header */}
+                      <div className="flex items-center gap-3 px-3 py-3 mb-1 rounded-xl bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-fuchsia-500/10 border border-border/40">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 text-white font-bold flex items-center justify-center shadow-md shadow-indigo-500/20 shrink-0">
+                          {userName.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Signed in as</div>
+                          <div className="text-sm font-bold truncate text-foreground">{userName}</div>
+                        </div>
                       </div>
                       <button 
                         onClick={() => { setIsProfileMenuOpen(false); setEditNameValue(userName); setIsEditingName(true); }}
-                        className="text-left text-sm px-3 py-2.5 hover:bg-primary/10 rounded-xl transition-colors flex items-center gap-3 font-medium text-foreground"
+                        className="group text-left text-sm px-2.5 py-2.5 hover:bg-primary/10 rounded-xl transition-colors flex items-center gap-3 font-medium text-foreground"
                       >
-                        <Pencil className="w-4 h-4 text-primary" /> Change Name
+                        <span className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/15 transition-colors">
+                          <Pencil className="w-4 h-4 text-primary" />
+                        </span>
+                        Change Name
                       </button>
                       <button 
                         onClick={handleLogout} 
-                        className="text-left text-sm px-3 py-2.5 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors flex items-center gap-3 font-medium mt-1"
+                        className="group text-left text-sm px-2.5 py-2.5 text-red-500 hover:bg-red-500/10 rounded-xl transition-colors flex items-center gap-3 font-medium"
                       >
-                        <X className="w-4 h-4" /> Sign Out
+                        <span className="w-8 h-8 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0 group-hover:bg-red-500/15 transition-colors">
+                          <X className="w-4 h-4" />
+                        </span>
+                        Sign Out
                       </button>
                     </div>
                   )}
@@ -219,20 +238,32 @@ export default function Home() {
       {/* HERO SECTION */}
       <main className="flex-1 flex flex-col items-center justify-center p-4 relative pt-32 pb-20">
         {/* Decorative blobs */}
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-primary/10 blur-[100px] pointer-events-none" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full bg-indigo-500/10 blur-[100px] pointer-events-none" />
+        <div className="absolute top-[-15%] left-[-10%] w-[45%] h-[45%] rounded-full bg-gradient-to-br from-indigo-500/30 to-purple-500/20 blur-[110px] pointer-events-none animate-pulse" />
+        <div className="absolute bottom-[-15%] right-[-10%] w-[45%] h-[45%] rounded-full bg-gradient-to-tr from-fuchsia-500/25 to-pink-500/20 blur-[110px] pointer-events-none animate-pulse" />
+        <div className="absolute top-[20%] right-[15%] w-[25%] h-[25%] rounded-full bg-cyan-400/15 blur-[90px] pointer-events-none" />
 
         <div className="text-center mb-10 z-10 animate-in fade-in slide-in-from-bottom-4 duration-1000 max-w-2xl">
 
-          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-foreground mb-6">
-            Free expense splitter for friends, roommates, and trips.
+          <div className="inline-flex items-center gap-2 mb-6 px-4 py-1.5 rounded-full bg-gradient-to-r from-indigo-500/10 to-fuchsia-500/10 border border-primary/20 text-sm font-semibold text-primary backdrop-blur-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-fuchsia-500 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-fuchsia-500" />
+            </span>
+            100% Free · Sign in in Seconds
+          </div>
+
+          <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight mb-6 leading-[1.1]">
+            <span className="text-foreground">Free expense splitter for </span>
+            <span className="bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 bg-clip-text text-transparent">friends, roommates, and trips.</span>
           </h1>
           <p className="text-lg md:text-xl text-muted-foreground max-w-xl mx-auto">
             Split shared bills, track receipts, handle recurring expenses, and settle up with fewer payments.
           </p>
         </div>
 
-        <Card className="w-full max-w-md shadow-2xl dark:shadow-none shadow-indigo-900/5 border-0 bg-card z-10 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-150">
+        <div className="w-full max-w-md z-10 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-150 relative">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 rounded-[calc(1.5rem+2px)] blur opacity-20 dark:opacity-30" />
+          <Card className="relative w-full shadow-2xl dark:shadow-none shadow-indigo-900/10 border border-border/50 bg-card/95 backdrop-blur-sm">
           <CardContent className="pt-8">
             <form onSubmit={handleCreateGroup} className="space-y-4">
               <div className="space-y-2">
@@ -247,7 +278,7 @@ export default function Home() {
               <Button
                 type="submit"
                 size="lg"
-                className="w-full h-14 text-lg font-semibold rounded-[1.5rem]"
+                className="w-full h-14 text-lg font-semibold rounded-[1.5rem] bg-gradient-to-r from-indigo-500 via-purple-500 to-fuchsia-500 hover:opacity-90 text-white border-0 shadow-lg shadow-purple-500/25 transition-all hover:shadow-xl hover:shadow-purple-500/30 hover:-translate-y-0.5"
                 disabled={isLoading || !groupName.trim()}
               >
                 {isLoading ? "Creating..." : "Start Splitting"}
@@ -274,6 +305,7 @@ export default function Home() {
             )}
           </CardContent>
         </Card>
+        </div>
       </main>
 
       {/* HOW IT WORKS */}
@@ -285,26 +317,26 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8 relative">
             {/* Step 1 */}
-            <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary"><PlusCircle className="w-6 h-6" /></div>
+            <div className="group flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-300"><PlusCircle className="w-7 h-7" /></div>
               <h3 className="text-xl font-semibold text-foreground">Create a Group</h3>
               <p className="text-muted-foreground text-sm">Name your trip or household. No account needed to get started.</p>
             </div>
             {/* Step 2 */}
-            <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary"><Users className="w-6 h-6" /></div>
+            <div className="group flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-500 flex items-center justify-center text-white shadow-lg shadow-purple-500/30 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-300"><Users className="w-7 h-7" /></div>
               <h3 className="text-xl font-semibold text-foreground">Add Friends</h3>
               <p className="text-muted-foreground text-sm">Add anyone involved. They can view the ledger anytime.</p>
             </div>
             {/* Step 3 */}
-            <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary"><Receipt className="w-6 h-6" /></div>
+            <div className="group flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-pink-500 flex items-center justify-center text-white shadow-lg shadow-pink-500/30 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-300"><Receipt className="w-7 h-7" /></div>
               <h3 className="text-xl font-semibold text-foreground">Add Expenses</h3>
               <p className="text-muted-foreground text-sm">Record who paid and who was involved. We handle the math.</p>
             </div>
             {/* Step 4 */}
-            <div className="flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary"><ArrowRightLeft className="w-6 h-6" /></div>
+            <div className="group flex flex-col items-center text-center space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 group-hover:scale-110 group-hover:-rotate-6 transition-transform duration-300"><ArrowRightLeft className="w-7 h-7" /></div>
               <h3 className="text-xl font-semibold text-foreground">Settle Up</h3>
               <p className="text-muted-foreground text-sm">Pay the optimal, minimized amount of transactions to get even.</p>
             </div>
@@ -321,9 +353,9 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <Card className="bg-card/50 backdrop-blur-sm border-border shadow-sm hover:shadow-md transition-shadow rounded-3xl">
+            <Card className="group bg-card/60 backdrop-blur-sm border border-border/60 shadow-sm hover:shadow-xl hover:shadow-orange-500/10 hover:-translate-y-1 transition-all duration-300 rounded-3xl">
               <CardContent className="p-8 space-y-4 text-center flex flex-col items-center">
-                <div className="w-14 h-14 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 mb-2">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-400 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-orange-500/30 mb-2 group-hover:scale-110 transition-transform duration-300">
                   <Repeat className="w-6 h-6" />
                 </div>
                 <h3 className="text-xl font-bold text-foreground">Recurring Expenses</h3>
@@ -331,9 +363,9 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="bg-card/50 backdrop-blur-sm border-border shadow-sm hover:shadow-md transition-shadow rounded-3xl">
+            <Card className="group bg-card/60 backdrop-blur-sm border border-border/60 shadow-sm hover:shadow-xl hover:shadow-blue-500/10 hover:-translate-y-1 transition-all duration-300 rounded-3xl">
               <CardContent className="p-8 space-y-4 text-center flex flex-col items-center">
-                <div className="w-14 h-14 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 mb-2">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-400 to-cyan-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 mb-2 group-hover:scale-110 transition-transform duration-300">
                   <Paperclip className="w-6 h-6" />
                 </div>
                 <h3 className="text-xl font-bold text-foreground">Receipt Uploads</h3>
@@ -341,9 +373,9 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <Card className="bg-card/50 backdrop-blur-sm border-border shadow-sm hover:shadow-md transition-shadow rounded-3xl">
+            <Card className="group bg-card/60 backdrop-blur-sm border border-border/60 shadow-sm hover:shadow-xl hover:shadow-emerald-500/10 hover:-translate-y-1 transition-all duration-300 rounded-3xl">
               <CardContent className="p-8 space-y-4 text-center flex flex-col items-center">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 mb-2">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 mb-2 group-hover:scale-110 transition-transform duration-300">
                   <Download className="w-6 h-6" />
                 </div>
                 <h3 className="text-xl font-bold text-foreground">Export to CSV</h3>

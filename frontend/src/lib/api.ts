@@ -29,9 +29,27 @@ export interface SettlementPayload {
   amount: number;
 }
 
+// --- Error type ---
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 // --- Helper for Fetching ---
 function getAuthToken() {
   return typeof window !== 'undefined' ? localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) : null;
+}
+
+// Clears any stale/expired session data from localStorage.
+function clearSession() {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+  localStorage.removeItem("splitvero_user_id");
+  localStorage.removeItem("splitvero_user_name");
 }
 
 async function fetchAPI(endpoint: string, options: RequestInit = {}) {
@@ -50,8 +68,13 @@ async function fetchAPI(endpoint: string, options: RequestInit = {}) {
   });
   
   if (!res.ok) {
-    const error = await res.json();
-    throw new Error(error.detail || "API request failed");
+    // An expired or invalid token means the stored session is no longer valid.
+    // Clear it so we don't keep retrying with a bad token on every load.
+    if (res.status === 401) {
+      clearSession();
+    }
+    const error = await res.json().catch(() => ({}));
+    throw new ApiError(error.detail || "API request failed", res.status);
   }
   return res.json();
 }
